@@ -550,8 +550,12 @@ function renderDebugLog() {
   const infoCard = document.getElementById("infoCard");
   let infoHideTimer = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-  pickHandler.setInputAction((click) => {
-    if (plantMode) return;
+
+  // ★重要：CesiumのScreenSpaceEventHandlerは、同じイベント種類（LEFT_CLICK）に対して
+  // 　setInputActionを複数回呼ぶと、後から登録した方が前のものを完全に上書きしてしまう。
+  // 　そのため「芽の詳細を見る」処理はここでは登録せず、ただの関数として定義しておき、
+  // 　実際の登録は後方の「気になる場所を選ぶモード」セクションで、1つのハンドラにまとめて行う。
+  function showInfoForTap(click) {
     const picked = viewer.scene.pick(click.position);
     if (!picked || !picked.id) return;
     const r = plantEntities.get(picked.id.id);
@@ -566,7 +570,7 @@ function renderDebugLog() {
     infoCard.classList.add("show");
     clearTimeout(infoHideTimer);
     infoHideTimer = setTimeout(() => infoCard.classList.remove("show"), 6000);
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -641,8 +645,12 @@ function renderDebugLog() {
     }
   }
 
+  // ここで唯一のLEFT_CLICKハンドラとして登録する（芽の詳細表示／場所選択、両方をここで分岐する）
   pickHandler.setInputAction((click) => {
-    if (!plantMode) return;
+    if (!plantMode) {
+      showInfoForTap(click);
+      return;
+    }
     const ray = viewer.camera.getPickRay(click.position);
     if (!ray) return;
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
