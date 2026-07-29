@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-07-29T14:09:52.678Z",
+  "lastUpdated": "2026-07-29T14:10:04.132Z",
   "responses": [
     {
       "id": "r_test0001",
@@ -22,6 +22,28 @@
       "content": "これはGASからGitHubへの疎通確認用のダミーデータです。",
       "latitude": 35.5,
       "longitude": 139.4
+    },
+    {
+      "id": "r_3979f0be",
+      "timestamp": "2026-07-29T13:33:22.145Z",
+      "date": "2026-07-29",
+      "reporterId": "v_bf2c1d5bwph",
+      "type": "positive",
+      "title": "ああああ",
+      "content": "いいいい",
+      "latitude": 35.451547,
+      "longitude": 139.525911
+    },
+    {
+      "id": "r_c786dda6",
+      "timestamp": "2026-07-29T14:03:22.022Z",
+      "date": "2026-07-29",
+      "reporterId": "v_bf2c1d5bwph",
+      "type": "negative",
+      "title": "マイナステスト",
+      "content": "とくになし",
+      "latitude": 35.451883,
+      "longitude": 139.525766
     }
   ]
 }
