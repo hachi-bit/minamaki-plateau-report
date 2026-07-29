@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>みなまき気になるマップ | Minamaki Concern Map</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif; color:#eaf2ff; }
+  #cesiumContainer { width:100%; height:100%; }
+  .cesium-credit-logoContainer{ display:none !important; }
+  .cesium-credit-textContainer{ font-size:9px !important; }
+  .cesium-viewer-bottom{ display:none !important; }
+
+  :root{
+    --accent:#ffd166; --panel:rgba(8,12,26,0.78); --border:rgba(255,255,255,0.1); --sub:#9db3d6;
+    --plus:#4ade80; --minus:#a9713f;
+  }
+
+  #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:10px; background:#04060f; z-index:60; transition:opacity .5s; }
+  #loading .spin{ width:34px; height:34px; border-radius:50%; border:3px solid #223; border-top-color:var(--accent); animation:spin 1s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #loading p{ color:var(--sub); font-size:13px; }
+
+  #hud{ position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-start;
+    padding:14px 16px; pointer-events:none; z-index:10; }
+  #titleBox h1{ font-size:15px; margin:0 0 2px; font-weight:600; }
+  #titleBox span{ font-size:10.5px; color:var(--sub); }
+  #stats{ display:flex; gap:8px; pointer-events:auto; }
+  .stat{ background:var(--panel); border:1px solid var(--border); backdrop-filter:blur(6px);
+    border-radius:12px; padding:7px 11px; text-align:center; min-width:56px; }
+  .stat b{ display:block; font-size:17px; line-height:1.1; color:var(--accent); }
+  .stat small{ font-size:10px; color:var(--sub); }
+
+  #ticker{ position:fixed; top:60px; left:50%; transform:translateX(-50%); max-width:min(520px,86vw);
+    text-align:center; font-size:12px; background:var(--panel); border:1px solid var(--border);
+    border-radius:999px; padding:7px 16px; backdrop-filter:blur(6px); opacity:0; transition:opacity .8s;
+    z-index:10; pointer-events:none; }
+  #ticker.show{ opacity:1; }
+
+  #legend{ position:fixed; left:16px; bottom:150px; display:none; flex-direction:column; gap:6px;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:10px 12px;
+    font-size:11px; color:var(--sub); backdrop-filter:blur(6px); z-index:20; max-width:220px; }
+  #legend.open{ display:flex; }
+  #legend .row{ display:flex; align-items:center; gap:6px; }
+  #legend .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  #legend .cap{ color:#eaf2ff; font-size:11px; margin-top:2px; }
+
+  #infoCard{ position:fixed; left:50%; bottom:150px; transform:translateX(-50%) translateY(10px);
+    max-width:min(340px,86vw); background:var(--panel); border:1px solid rgba(255,209,102,0.5);
+    border-radius:14px; padding:12px 16px; font-size:12.5px; line-height:1.6; backdrop-filter:blur(6px);
+    opacity:0; pointer-events:none; transition:all .35s ease; z-index:22; }
+  #infoCard.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #infoCard .tag{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:10.5px;
+    margin:2px 4px 6px 0; color:#0a0d16; font-weight:700; }
+  #infoCard .mine{ color:var(--accent); font-weight:700; margin-top:4px; }
+  #infoCard .titleLine{ font-size:13.5px; font-weight:700; margin-bottom:2px; }
+  #infoCard .contentLine{ color:var(--sub); }
+
+  #controls{ position:fixed; right:16px; bottom:150px; display:flex; flex-direction:column; gap:8px; z-index:15; }
+  .iconBtn{ width:42px; height:42px; border-radius:50%; background:var(--panel); border:1px solid var(--border);
+    color:#eaf2ff; display:flex; align-items:center; justify-content:center; font-size:16px; cursor:pointer;
+    backdrop-filter:blur(6px); }
+  .iconBtn.active{ border-color:var(--accent); color:var(--accent); }
+
+  #ctaBar{ position:fixed; left:0; right:0; bottom:0; padding:14px 16px calc(16px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; align-items:center; gap:8px; z-index:25; }
+
+  #plantConfirmBar{ width:100%; max-width:420px; background:var(--panel); border:1px solid rgba(255,209,102,0.5);
+    border-radius:14px; padding:12px; display:none; align-items:center; justify-content:space-between; gap:8px;
+    backdrop-filter:blur(10px); }
+  #plantConfirmBar.show{ display:flex; }
+  #plantConfirmBar span{ font-size:11.5px; color:var(--sub); }
+  .sheetBtn{ flex:1; padding:11px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05);
+    color:#eaf2ff; font-size:12.5px; cursor:pointer; }
+  .sheetBtn.primary{ background:linear-gradient(135deg,#ffd166,#ff8fab); color:#1a1206; border:none; font-weight:700; }
+
+  #ctaBtn{ background:linear-gradient(135deg,#ffd166,#ff8fab); color:#1a1206; border:none;
+    padding:13px 26px; border-radius:999px; font-size:14px; font-weight:700; letter-spacing:.02em;
+    box-shadow:0 8px 24px rgba(255,143,171,0.35); cursor:pointer; }
+  #ctaBtn:disabled{ opacity:0.4; pointer-events:none; }
+
+  #plantHint{ position:fixed; top:100px; left:50%; transform:translateX(-50%); background:rgba(74,222,128,0.15);
+    border:1px solid #4ade80; color:#4ade80; padding:8px 16px; border-radius:8px; font-size:12px; z-index:20; display:none; }
+  #plantHint.show{ display:block; }
+
+  #camPanel{ position:fixed; right:16px; bottom:200px; width:min(260px,80vw); background:var(--panel);
+    border:1px solid var(--border); border-radius:12px; padding:10px 12px; backdrop-filter:blur(6px);
+    z-index:20; display:none; }
+  #camPanel.show{ display:block; }
+
+  #debugLogPanel{ position:fixed; left:16px; right:16px; bottom:150px; top:70px; background:rgba(4,6,15,0.95);
+    border:1px solid var(--border); border-radius:12px; padding:10px 12px; backdrop-filter:blur(6px);
+    z-index:30; display:none; overflow:hidden; }
+  #debugLogPanel.show{ display:flex; flex-direction:column; }
+  #debugLogBody{ flex:1; overflow-y:auto; font-family:monospace; font-size:10.5px; color:#c7d6f5;
+    white-space:pre-wrap; word-break:break-all; margin:0; }
+
+  @media (max-width:520px){
+    #legend{ max-width:78vw; }
+    .stat{ min-width:48px; padding:6px 9px; }
+    .stat b{ font-size:14px; }
+    #titleBox h1{ font-size:13px; }
+  }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="loading"><div class="spin"></div><p>気になるマップを読み込んでいます…</p></div>
+
+<div id="hud">
+  <div id="titleBox">
+    <h1>みなまき気になるマップ</h1>
+    <span>気になった場所に、芽が生える</span>
+  </div>
+  <div id="stats">
+    <div class="stat"><b id="statTotal">0</b><small>総投稿</small></div>
+    <div class="stat"><b id="statPositive">0</b><small>おすすめ</small></div>
+    <div class="stat"><b id="statNegative">0</b><small>気になる点</small></div>
+  </div>
+</div>
+
+<div id="ticker"></div>
+<div id="infoCard"></div>
+<div id="plantHint">📍 気になった場所をタップしてな</div>
+
+<div id="legend">
+  <div class="cap">👆 芽をタップすると詳細が見れるで</div>
+  <div class="cap">芽の色（種類）</div>
+  <div class="row"><span class="dot" style="background:var(--plus)"></span>プラスの意見（おすすめ）</div>
+  <div class="row"><span class="dot" style="background:var(--minus)"></span>マイナスの意見（気になる点）</div>
+  <div class="row"><span class="dot" style="background:#ffffff;border:2px solid #ffd166"></span>あなたの投稿</div>
+  <div class="cap" style="margin-top:4px;">※運営が承認した投稿だけが表示されるで</div>
+</div>
+
+<div id="controls">
+  <button class="iconBtn" id="infoBtn" title="見方">❔</button>
+  <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
+  <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
+  <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
+  <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
+</div>
+
+<div id="debugLogPanel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <span style="font-size:11px;color:var(--sub);">🐞 ログ</span>
+    <div style="display:flex;gap:6px;">
+      <button class="sheetBtn" id="debugLogCopyBtn" style="padding:5px 10px;font-size:11px;">📋 コピー</button>
+      <button class="sheetBtn" id="debugLogCloseBtn" style="padding:5px 10px;font-size:11px;">閉じる</button>
+    </div>
+  </div>
+  <pre id="debugLogBody"></pre>
+</div>
+
+<div id="camPanel">
+  <div style="font-size:11px;color:var(--sub);margin-bottom:4px;">📷 現在のカメラ座標</div>
+  <div id="camPanelBody" style="font-family:monospace;font-size:11px;word-break:break-all;line-height:1.5;"></div>
+  <button class="sheetBtn primary" id="camPanelCopyBtn" style="margin-top:8px;width:100%;">📋 この視点をコピー</button>
+</div>
+
+<div id="ctaBar">
+  <div id="plantConfirmBar">
+    <span>この場所を報告するのら？</span>
+    <button class="sheetBtn primary" id="plantConfirmBtn" style="flex:none;padding:9px 16px;">決定</button>
+    <button class="sheetBtn" id="plantCancelBtn" style="flex:none;padding:9px 16px;">やめる</button>
+  </div>
+  <button id="ctaBtn" disabled>📝 気になることを投稿する</button>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const CONFIG = {
+  dataUrl: "./data/concerns.json",
+  formBaseUrl: "https://docs.google.com/forms/d/e/1FAIpQLSeK1BnxEFe2gPVOqga8qW_JWMEpKo3R2UXRllH742HYRE9O0Q/viewform",
+  formReporterIdEntry: "entry.1280885733", // 報告者ID
+  formLatEntry: "entry.1398530886",        // 緯度
+  formLonEntry: "entry.2084573593",        // 経度
+};
+
+// FreeDay版と同じPLATEAU Ionアカウントを流用（同一エリアのため）
+const PLATEAU_ION_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
+  'eyJqdGkiOiJlNjk0MTM4NC1lMWI0LTQxNTgtYjcxZS01ZWJhMGJlMTE1MWQiLCJpZCI6MTQ5ODk3LCJpYXQiOjE3MTUxNTEyODZ9.' +
+  '2aUmEQ2-fDsjf-XeC6-hZpwkgwLse3yXoXF4xTOvPAY';
+const TERRAIN_ASSET_ID = 2488101;
+
+// FreeDay版のカメラ位置をそのまま流用（同じエリアを見せるため）
+const INITIAL_CAMERA = { lon: 139.525347, lat: 35.450514, height: 259.7, heading: 24.10, pitch: -52.00, roll: 0.00 };
+
+// 旭区・泉区（南万騎が原／緑園都市エリア）の建物3D Tiles（FreeDay版と同一）
+const BUILDING_URLS = [
+  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json', // 旭区
+  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod1-texture-2024/tileset.json', // 泉区
+];
+
+const TYPE_COLORS = { positive: '#4ade80', negative: '#a9713f' };
+const TYPE_LABELS = { positive: 'プラスの意見（おすすめ）', negative: 'マイナスの意見（気になる点）' };
+function colorForType(type) {
+  return TYPE_COLORS[type] || '#9ca3af';
+}
+function labelForType(type) {
+  return TYPE_LABELS[type] || '種類不明';
+}
+
+/* ============================================================
+   報告者ID（localStorage・ログイン不要の緩い識別。自分の投稿を光らせるのに使う）
+   ============================================================ */
+const REPORTER_KEY = "minamaki_reporter_id";
+function getOrCreateReporterId() {
+  const existing = localStorage.getItem(REPORTER_KEY);
+  if (existing) return existing;
+  const id = "v_" + Math.random().toString(16).slice(2, 10) + Date.now().toString(36).slice(-3);
+  localStorage.setItem(REPORTER_KEY, id);
+  return id;
+}
+let MY_REPORTER_ID = null;
+
+/* ============================================================
+   データ取得
+   ============================================================ */
+const SAMPLE_FALLBACK = {
+  lastUpdated: new Date().toISOString(),
+  responses: [
+    { id:"demo1", date:"2026-07-20", reporterId:"v_demo1", type:"positive", title:"◯◯公園の桜並木", content:"この時期は花がとても綺麗です。ベンチも多くて休憩しやすいです。", latitude:35.4318, longitude:139.5192 },
+    { id:"demo2", date:"2026-07-22", reporterId:"v_demo2", type:"negative", title:"歩道の段差", content:"歩道の一部が大きく段差になっていて、ベビーカーや車椅子だと通りにくいです。", latitude:35.4314, longitude:139.5185 },
+  ],
+};
+
+// 緯度経度が数値でも文字列でも扱えるようにする
+function toNum(v) {
+  if (typeof v === "number" && isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && isFinite(Number(v))) return Number(v);
+  return null;
+}
+
+async function loadData() {
+  try {
+    const bust = `${CONFIG.dataUrl}${CONFIG.dataUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    const res = await fetch(bust, { cache: "no-store" });
+    if (!res.ok) throw new Error("fetch failed");
+    const json = await res.json();
+    if (!json.responses || !json.responses.length) throw new Error("empty");
+    json.responses.forEach((r) => {
+      r.lat = toNum(r.latitude ?? r.lat);
+      r.lon = toNum(r.longitude ?? r.lon);
+    });
+    return json;
+  } catch (e) {
+    console.warn("concerns.json が読めなかったのでサンプルを表示するのら:", e.message);
+    const sample = JSON.parse(JSON.stringify(SAMPLE_FALLBACK));
+    sample.responses.forEach((r) => { r.lat = r.latitude; r.lon = r.longitude; });
+    return sample;
+  }
+}
+
+function offsetLatLon(lat, lon, angleRad, distM) {
+  const mToRadLat = distM / 6371000;
+  const dLat = Math.cos(angleRad) * mToRadLat;
+  const dLon = (Math.sin(angleRad) * mToRadLat) / Math.cos(lat * Math.PI / 180);
+  return { lat: lat + dLat * 180 / Math.PI, lon: lon + dLon * 180 / Math.PI };
+}
+
+/* ============================================================
+   起動
+   ============================================================ */
+Cesium.Ion.defaultAccessToken = PLATEAU_ION_TOKEN;
+
+/* ============================================================
+   デバッグログ（画面上に表示・コピーできるようにする）
+   ============================================================ */
+const DEBUG_LOGS = [];
+function logDebug(msg) {
+  const line = `[${new Date().toLocaleTimeString("ja-JP")}] ${msg}`;
+  DEBUG_LOGS.push(line);
+  renderDebugLog();
+}
+["log", "warn", "error"].forEach((level) => {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    DEBUG_LOGS.push(`[${new Date().toLocaleTimeString("ja-JP")}] (${level}) ` + args.map(String).join(" "));
+    renderDebugLog();
+  };
+});
+function renderDebugLog() {
+  const el = document.getElementById("debugLogBody");
+  if (el) el.textContent = DEBUG_LOGS.join("\n");
+}
+
+(async () => {
+  const viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayer: false,
+    terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID),
+    animation: false, timeline: false, homeButton: false, geocoder: false,
+    sceneModePicker: false, baseLayerPicker: false, navigationHelpButton: false,
+    fullscreenButton: false, selectionIndicator: false, infoBox: false,
+  });
+  viewer.scene.globe.depthTestAgainstTerrain = true;
+  try {
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+      maximumLevel: 18, credit: '地理院タイル',
+    }));
+  } catch (e) {
+    viewer.imageryLayers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
+  }
+  viewer.scene.globe.enableLighting = true;
+  viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+  const tilesets = [];
+  for (const url of BUILDING_URLS) {
+    try {
+      const ts = await Cesium.Cesium3DTileset.fromUrl(url);
+      viewer.scene.primitives.add(ts);
+      tilesets.push(ts);
+    } catch (e) { console.warn('建物タイル読み込み失敗:', url, e.message); }
+  }
+
+  function flyHome(duration) {
+    viewer.trackedEntity = undefined;
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(INITIAL_CAMERA.lon, INITIAL_CAMERA.lat, INITIAL_CAMERA.height),
+      orientation: { heading: Cesium.Math.toRadians(INITIAL_CAMERA.heading), pitch: Cesium.Math.toRadians(INITIAL_CAMERA.pitch), roll: 0 },
+      duration,
+    });
+  }
+
+  flyHome(2);
+  document.getElementById("homeBtn").addEventListener("click", () => flyHome(1.5));
+
+  let REFERENCE_GROUND_HEIGHT = 100;
+  groundHeightAt(INITIAL_CAMERA.lat, INITIAL_CAMERA.lon).then((h) => {
+    REFERENCE_GROUND_HEIGHT = h;
+    logDebug(`基準地点の高さを取得: ${h.toFixed(1)}m`);
+  });
+
+  /* ============================================================
+     📷 カメラ情報パネル（デバッグ用）
+     ============================================================ */
+  const camPanel = document.getElementById("camPanel");
+  const camPanelToggle = document.getElementById("camPanelToggleBtn");
+  let camPanelOpen = false;
+  camPanelToggle.addEventListener("click", () => {
+    camPanelOpen = !camPanelOpen;
+    camPanel.classList.toggle("show", camPanelOpen);
+  });
+  function updateCamPanel() {
+    if (!camPanelOpen) return;
+    const p = viewer.camera.positionCartographic;
+    document.getElementById("camPanelBody").textContent =
+      `lon: ${Cesium.Math.toDegrees(p.longitude).toFixed(6)}, lat: ${Cesium.Math.toDegrees(p.latitude).toFixed(6)}, height: ${p.height.toFixed(1)}, heading: ${Cesium.Math.toDegrees(viewer.camera.heading).toFixed(2)}, pitch: ${Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(2)}`;
+  }
+  viewer.camera.changed.addEventListener(updateCamPanel);
+  viewer.camera.percentageChanged = 0.001;
+  document.getElementById("camPanelCopyBtn").addEventListener("click", () => {
+    const p = viewer.camera.positionCartographic;
+    const code = `{ lon: ${Cesium.Math.toDegrees(p.longitude).toFixed(6)}, lat: ${Cesium.Math.toDegrees(p.latitude).toFixed(6)}, height: ${p.height.toFixed(1)}, heading: ${Cesium.Math.toDegrees(viewer.camera.heading).toFixed(2)}, pitch: ${Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(2)}, roll: 0.00 }`;
+    navigator.clipboard.writeText(code).then(() => {
+      const btn = document.getElementById("camPanelCopyBtn");
+      btn.textContent = "✅ コピーした！";
+      setTimeout(() => (btn.textContent = "📋 この視点をコピー"), 1800);
+    });
+  });
+
+  /* ============================================================
+     ゆっくり見渡す
+     ============================================================ */
+  let tour = false;
+  document.getElementById("tourBtn").addEventListener("click", (e) => {
+    tour = !tour;
+    e.currentTarget.classList.toggle("active", tour);
+  });
+  const sscc = viewer.scene.screenSpaceCameraController;
+  viewer.scene.preRender.addEventListener(() => {
+    if (tour && !plantMode) {
+      viewer.camera.setView({
+        orientation: { heading: viewer.camera.heading + 0.00045, pitch: viewer.camera.pitch, roll: 0 },
+      });
+    }
+  });
+
+  /* ============================================================
+     芽を生やす（承認済みデータから）
+     ============================================================ */
+  const plantEntities = new Map(); // entityId -> record
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  const REASONABLE_MIN = -50, REASONABLE_MAX = 3000;
+  function isReasonableHeight(h) {
+    return typeof h === "number" && !isNaN(h) && h > REASONABLE_MIN && h < REASONABLE_MAX;
+  }
+
+  async function trySampleHeightOnce(lat, lon) {
+    try {
+      const sampled = await viewer.scene.sampleHeightMostDetailed([Cesium.Cartographic.fromDegrees(lon, lat)]);
+      if (isReasonableHeight(sampled[0] && sampled[0].height)) return sampled[0].height;
+    } catch (e) { console.warn("建物込みの高さサンプリング失敗:", e.message); }
+    try {
+      const sampled2 = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [Cesium.Cartographic.fromDegrees(lon, lat)]);
+      if (isReasonableHeight(sampled2[0] && sampled2[0].height)) return sampled2[0].height;
+    } catch (e) { console.warn("地形サンプリングも失敗:", e.message); }
+    return null;
+  }
+
+  async function groundHeightAt(lat, lon) {
+    const MAX_TRIES = 4;
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      const h = await trySampleHeightOnce(lat, lon);
+      if (h !== null) return h;
+      if (attempt < MAX_TRIES) await sleep(500);
+    }
+    const h = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat));
+    if (isReasonableHeight(h)) return h;
+    logDebug(`⚠️高さ取得失敗。基準地点の高さ(${REFERENCE_GROUND_HEIGHT.toFixed(1)}m)で代用: lat=${lat} lon=${lon}`);
+    return REFERENCE_GROUND_HEIGHT;
+  }
+
+  const DEBUG_PILLARS = false;
+  function addDebugPillar(lat, lon, groundH, colorHex) {
+    if (!DEBUG_PILLARS) return;
+    viewer.entities.add({
+      polyline: {
+        positions: [
+          Cesium.Cartesian3.fromDegrees(lon, lat, groundH - 5),
+          Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 80),
+        ],
+        width: 8,
+        material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.35, color: Cesium.Color.fromCssColorString(colorHex) }),
+      },
+    });
+  }
+
+  function plantSvg(hexColor) {
+    const c = hexColor.replace('#', '%23');
+    return ('data:image/svg+xml,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 20 20">`
+      + `<path d="M10 20 C10 13 6 11 4 5" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+      + `<path d="M10 20 C10 12 10 10 10 2" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+      + `<path d="M10 20 C10 13 14 11 16 6" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+      + `</svg>`
+    )).replace(/%2523/g, '%23');
+  }
+
+  // 自分の投稿の周りに出す、ふわっと光るオーラ
+  function auraSvg() {
+    return 'data:image/svg+xml,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">`
+      + `<defs><radialGradient id="g" cx="50%" cy="50%" r="50%">`
+      + `<stop offset="0%" stop-color="#ffd166" stop-opacity="0.8"/>`
+      + `<stop offset="55%" stop-color="#ffd166" stop-opacity="0.22"/>`
+      + `<stop offset="100%" stop-color="#ffd166" stop-opacity="0"/>`
+      + `</radialGradient></defs>`
+      + `<circle cx="60" cy="60" r="60" fill="url(#g)"/>`
+      + `</svg>`
+    );
+  }
+
+  // 同じ地点に複数投稿があっても重ならないよう、IDから決まる固定の小さなズレを入れる
+  function jitterFor(seedKey) {
+    let h = 0;
+    for (const c of String(seedKey)) h = (h * 37 + c.charCodeAt(0)) >>> 0;
+    const angle = (h % 360) * Math.PI / 180;
+    const dist = 0.15 + ((h >> 8) % 100) / 100 * 0.4;
+    return { angle, dist };
+  }
+
+  async function plantConcern(r) {
+    try {
+      if (typeof r.lat !== "number" || typeof r.lon !== "number") {
+        logDebug(`スキップ（位置情報なし）: id=${r.id} title=${r.title}`);
+        return;
+      }
+      const j = jitterFor(r.id);
+      const loc = offsetLatLon(r.lat, r.lon, j.angle, j.dist);
+      const groundH = await groundHeightAt(loc.lat, loc.lon);
+      addDebugPillar(loc.lat, loc.lon, groundH, colorForType(r.type));
+      const isMine = r.reporterId === MY_REPORTER_ID;
+      const size = 1.0 + Math.random() * 0.3;
+
+      const entity = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
+        billboard: {
+          image: plantSvg(colorForType(r.type)),
+          width: size, height: size, sizeInMeters: true,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      plantEntities.set(entity.id, r);
+
+      if (isMine) {
+        viewer.entities.add({
+          id: "myring_" + r.id,
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
+          ellipse: {
+            semiMinorAxis: size * 1.8, semiMajorAxis: size * 1.8,
+            material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.3),
+            outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166"), outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          },
+        });
+        viewer.entities.add({
+          id: "myaura_" + r.id,
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + size * 0.6),
+          billboard: {
+            image: auraSvg(), width: size * 4, height: size * 4, sizeInMeters: true,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      }
+      logDebug(`芽を生やした: id=${r.id} title=${r.title} type=${r.type}`);
+    } catch (e) {
+      logDebug(`⚠️芽の生成に失敗: id=${r.id} エラー=${e && e.message}`);
+    }
+  }
+
+  async function buildMap(data) {
+    logDebug(`buildMap開始: 総件数=${data.responses.length}`);
+    await Promise.all(data.responses.map(plantConcern));
+
+    document.getElementById("statTotal").textContent = data.responses.length;
+    document.getElementById("statPositive").textContent = data.responses.filter((r) => r.type === "positive").length;
+    document.getElementById("statNegative").textContent = data.responses.filter((r) => r.type === "negative").length;
+
+    const tickerTexts = data.responses
+      .filter((r) => r.title)
+      .map((r) => `${r.type === "positive" ? "🌱" : "🍂"} ${r.title}`);
+    startTicker(tickerTexts);
+  }
+
+  let tickerTimer = null;
+  function startTicker(texts) {
+    const el = document.getElementById("ticker");
+    if (tickerTimer) clearInterval(tickerTimer);
+    if (!texts.length) { el.classList.remove("show"); return; }
+    let i = 0;
+    const show = () => { el.innerHTML = `“ ${texts[i % texts.length]} ”`; el.classList.add("show"); i++; };
+    show();
+    tickerTimer = setInterval(show, 5500);
+  }
+
+  /* ============================================================
+     芽をタップして詳細を見る
+     ============================================================ */
+  const infoCard = document.getElementById("infoCard");
+  let infoHideTimer = null;
+  const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  pickHandler.setInputAction((click) => {
+    if (plantMode) return;
+    const picked = viewer.scene.pick(click.position);
+    if (!picked || !picked.id) return;
+    const r = plantEntities.get(picked.id.id);
+    if (!r) return;
+    const mine = r.reporterId === MY_REPORTER_ID ? `<div class="mine">★ これはあなたの投稿やで</div>` : "";
+    infoCard.innerHTML = `
+      <span class="tag" style="background:${colorForType(r.type)}">${labelForType(r.type)}</span>
+      <div class="titleLine">${escapeHtml(r.title || "")}</div>
+      <div class="contentLine">${escapeHtml(r.content || "")}</div>
+      ${mine}
+    `;
+    infoCard.classList.add("show");
+    clearTimeout(infoHideTimer);
+    infoHideTimer = setTimeout(() => infoCard.classList.remove("show"), 6000);
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  document.getElementById("infoBtn").addEventListener("click", (e) => {
+    document.getElementById("legend").classList.toggle("open");
+    e.currentTarget.classList.toggle("active");
+  });
+
+  document.getElementById("debugLogToggleBtn").addEventListener("click", () => {
+    document.getElementById("debugLogPanel").classList.add("show");
+    renderDebugLog();
+  });
+  document.getElementById("debugLogCloseBtn").addEventListener("click", () => {
+    document.getElementById("debugLogPanel").classList.remove("show");
+  });
+  document.getElementById("debugLogCopyBtn").addEventListener("click", () => {
+    navigator.clipboard.writeText(DEBUG_LOGS.join("\n")).then(() => {
+      const btn = document.getElementById("debugLogCopyBtn");
+      btn.textContent = "✅ コピーした";
+      setTimeout(() => (btn.textContent = "📋 コピー"), 1500);
+    });
+  });
+
+  /* ============================================================
+     気になる場所を選ぶモード
+     ・気になることの報告は「毎回、新しい実在の場所」を選ぶ性質のため、
+       FreeDay版にあった「前回と同じ場所」「おまかせ」の簡易ボタンは設けず、
+       CTAを押したら常に地図タップで場所を選ぶ、というシンプルな導線にしている
+     ============================================================ */
+  let plantMode = false;
+  let previewEntity = null;
+  let pendingLoc = null;
+  let prePlantCamera = null;
+
+  const plantHint = document.getElementById("plantHint");
+  const plantConfirmBar = document.getElementById("plantConfirmBar");
+
+  function enterPlantMode() {
+    plantMode = true;
+    plantHint.classList.add("show");
+    const pos = viewer.camera.positionCartographic;
+    prePlantCamera = { lon: pos.longitude, lat: pos.latitude, height: pos.height, heading: viewer.camera.heading, pitch: viewer.camera.pitch };
+
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromRadians(pos.longitude, pos.latitude, Math.max(pos.height, 400)),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    sscc.enableTilt = false;
+  }
+  function exitPlantMode() {
+    plantMode = false;
+    plantHint.classList.remove("show");
+    plantConfirmBar.classList.remove("show");
+    sscc.enableTilt = true;
+    sscc.enableRotate = true;
+    if (previewEntity) { viewer.entities.remove(previewEntity); previewEntity = null; }
+    if (prePlantCamera) {
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromRadians(prePlantCamera.lon, prePlantCamera.lat, prePlantCamera.height),
+        orientation: { heading: prePlantCamera.heading, pitch: prePlantCamera.pitch, roll: 0 },
+      });
+    }
+  }
+
+  pickHandler.setInputAction((click) => {
+    if (!plantMode) return;
+    const ray = viewer.camera.getPickRay(click.position);
+    if (!ray) return;
+    const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+    if (!cartesian) return;
+    const carto = Cesium.Cartographic.fromCartesian(cartesian);
+    pendingLoc = { lat: Cesium.Math.toDegrees(carto.latitude), lon: Cesium.Math.toDegrees(carto.longitude) };
+
+    if (previewEntity) viewer.entities.remove(previewEntity);
+    previewEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(pendingLoc.lon, pendingLoc.lat, 0),
+      point: { pixelSize: 16, color: Cesium.Color.fromCssColorString("#ffd166"), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    plantConfirmBar.classList.add("show");
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  /* ============================================================
+     投稿導線（フォームへ）
+     ============================================================ */
+  const ctaBtn = document.getElementById("ctaBtn");
+
+  function openForm(loc) {
+    const url = `${CONFIG.formBaseUrl}?usp=pp_url`
+      + `&${CONFIG.formReporterIdEntry}=${encodeURIComponent(MY_REPORTER_ID)}`
+      + `&${CONFIG.formLatEntry}=${encodeURIComponent(loc.lat.toFixed(6))}`
+      + `&${CONFIG.formLonEntry}=${encodeURIComponent(loc.lon.toFixed(6))}`;
+    window.open(url, "_blank");
+  }
+
+  async function previewSpot(loc) {
+    const groundH = await groundHeightAt(loc.lat, loc.lon);
+    addDebugPillar(loc.lat, loc.lon, groundH, "#4ade80");
+    viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
+      point: { pixelSize: 20, color: Cesium.Color.fromCssColorString("#4ade80"),
+        outlineColor: Cesium.Color.BLACK, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: "ここで報告します（この端末だけのプレビュー・承認されると本表示）", font: "bold 12px sans-serif",
+        fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -30),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+  }
+
+  ctaBtn.addEventListener("click", () => {
+    if (!MY_REPORTER_ID) return;
+    enterPlantMode();
+  });
+
+  document.getElementById("plantConfirmBtn").addEventListener("click", () => {
+    if (!pendingLoc) return;
+    previewSpot(pendingLoc);
+    const loc = pendingLoc;
+    exitPlantMode();
+    openForm(loc);
+  });
+  document.getElementById("plantCancelBtn").addEventListener("click", () => {
+    pendingLoc = null;
+    exitPlantMode();
+  });
+
+  /* ============================================================
+     起動
+     ============================================================ */
+  MY_REPORTER_ID = getOrCreateReporterId();
+
+  const data = await loadData();
+  await buildMap(data);
+  ctaBtn.disabled = false;
+
+  document.getElementById("loading").style.opacity = "0";
+  setTimeout(() => (document.getElementById("loading").style.display = "none"), 500);
+})();
+</script>
+</body>
+</html>
