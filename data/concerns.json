@@ -1,0 +1,16 @@
+{
+  "lastUpdated": "2026-07-29T11:00:32.966Z",
+  "responses": [
+    {
+      "id": "r_test0001",
+      "timestamp": "2026-07-29T11:00:32.558Z",
+      "date": "2026-07-29",
+      "reporterId": "v_test_dummy",
+      "type": "positive",
+      "title": "テスト投稿（動作確認用）",
+      "content": "これはGASからGitHubへの疎通確認用のダミーデータです。",
+      "latitude": 35.5,
+      "longitude": 139.4
+    }
+  ]
+}
