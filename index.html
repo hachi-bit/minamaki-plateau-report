@@ -612,8 +612,16 @@ function renderDebugLog() {
     const pos = viewer.camera.positionCartographic;
     prePlantCamera = { lon: pos.longitude, lat: pos.latitude, height: pos.height, heading: viewer.camera.heading, pitch: viewer.camera.pitch };
 
+    // 画面中央＝今まさに見ている地面の座標を求めて、そこを中心に真上から見下ろす形にする
+    // （カメラ自体の座標を使うと、斜めのアングルの時に「見えてる景色」とズレた場所が中心になってしまうため）
+    const centerRay = viewer.camera.getPickRay(new Cesium.Cartesian2(
+      viewer.scene.canvas.clientWidth / 2, viewer.scene.canvas.clientHeight / 2
+    ));
+    const groundPoint = centerRay ? viewer.scene.globe.pick(centerRay, viewer.scene) : null;
+    const targetCarto = groundPoint ? Cesium.Cartographic.fromCartesian(groundPoint) : pos;
+
     viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromRadians(pos.longitude, pos.latitude, Math.max(pos.height, 400)),
+      destination: Cesium.Cartesian3.fromRadians(targetCarto.longitude, targetCarto.latitude, Math.max(pos.height, 400)),
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     sscc.enableTilt = false;
