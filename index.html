@@ -27,6 +27,8 @@
 
   #hud{ position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-start;
     padding:14px 16px; pointer-events:none; z-index:10; }
+  #titleBox{ background:var(--panel); border:1px solid var(--border); backdrop-filter:blur(6px);
+    border-radius:12px; padding:8px 14px; }
   #titleBox h1{ font-size:15px; margin:0 0 2px; font-weight:600; }
   #titleBox span{ font-size:10.5px; color:var(--sub); }
   #stats{ display:flex; gap:8px; pointer-events:auto; }
@@ -519,7 +521,7 @@ function renderDebugLog() {
       plantEntities.set(canopy.id, r);
 
       if (isMine) {
-        viewer.entities.add({
+        const ring = viewer.entities.add({
           id: "myring_" + r.id,
           position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
           ellipse: {
@@ -529,7 +531,7 @@ function renderDebugLog() {
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           },
         });
-        viewer.entities.add({
+        const aura = viewer.entities.add({
           id: "myaura_" + r.id,
           position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
           billboard: {
@@ -537,6 +539,11 @@ function renderDebugLog() {
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
+        // ★重要：オーラ・輪っかも木本体と同じ記録に紐づけておかないと、
+        // 　光ってる部分をタップした時に「plantEntitiesに記録がない」扱いになり、
+        // 　詳細カードが出ないバグになる（自分の投稿だけ反応しない、という形で発覚した）
+        plantEntities.set(ring.id, r);
+        plantEntities.set(aura.id, r);
       }
       logDebug(`木を生やした: id=${r.id} title=${r.title} type=${r.type}`);
     } catch (e) {
