@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>みなまき気になるマップ | Minamaki Concern Map</title>
+<title>みなま木になるマップ</title>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -109,12 +109,12 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="loading"><div class="spin"></div><p>気になるマップを読み込んでいます…</p></div>
+<div id="loading"><div class="spin"></div><p>木になるマップを読み込んでいます…</p></div>
 
 <div id="hud">
   <div id="titleBox">
-    <h1>みなまき気になるマップ</h1>
-    <span>気になった場所に、芽が生える</span>
+    <h1>みなま木になるマップ</h1>
+    <span>気になる　木になる</span>
   </div>
   <div id="stats">
     <div class="stat"><b id="statTotal">0</b><small>総投稿</small></div>
@@ -128,10 +128,10 @@
 <div id="plantHint">📍 気になった場所をタップしてな</div>
 
 <div id="legend">
-  <div class="cap">👆 芽をタップすると詳細が見れるで</div>
-  <div class="cap">芽の色（種類）</div>
-  <div class="row"><span class="dot" style="background:var(--plus)"></span>プラスの意見（おすすめ）</div>
-  <div class="row"><span class="dot" style="background:var(--minus)"></span>マイナスの意見（気になる点）</div>
+  <div class="cap">👆 木をタップすると詳細が見れるで</div>
+  <div class="cap">木の色・形（種類）</div>
+  <div class="row"><span class="dot" style="background:var(--plus)"></span>🌳 丸い木＝プラスの意見（おすすめ）</div>
+  <div class="row"><span class="dot" style="background:var(--minus)"></span>🌲 円錐の木＝マイナスの意見（気になる点）</div>
   <div class="row"><span class="dot" style="background:#ffffff;border:2px solid #ffd166"></span>あなたの投稿</div>
   <div class="cap" style="margin-top:4px;">※運営が承認した投稿だけが表示されるで</div>
 </div>
@@ -391,7 +391,7 @@ function renderDebugLog() {
   });
 
   /* ============================================================
-     芽を生やす（承認済みデータから）
+     木を生やす（承認済みデータから）
      ============================================================ */
   const plantEntities = new Map(); // entityId -> record
   function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -441,17 +441,6 @@ function renderDebugLog() {
     });
   }
 
-  function plantSvg(hexColor) {
-    const c = hexColor.replace('#', '%23');
-    return ('data:image/svg+xml,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 20 20">`
-      + `<path d="M10 20 C10 13 6 11 4 5" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
-      + `<path d="M10 20 C10 12 10 10 10 2" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
-      + `<path d="M10 20 C10 13 14 11 16 6" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
-      + `</svg>`
-    )).replace(/%2523/g, '%23');
-  }
-
   // 自分の投稿の周りに出す、ふわっと光るオーラ
   function auraSvg() {
     return 'data:image/svg+xml,' + encodeURIComponent(
@@ -486,25 +475,53 @@ function renderDebugLog() {
       const groundH = await groundHeightAt(loc.lat, loc.lon);
       addDebugPillar(loc.lat, loc.lon, groundH, colorForType(r.type));
       const isMine = r.reporterId === MY_REPORTER_ID;
-      const size = 1.0 + Math.random() * 0.3;
+      const scale = 0.85 + Math.random() * 0.3;
+      const trunkH = 1.5 * scale;
+      const canopyR = 1.05 * scale;
+      const canopyColor = Cesium.Color.fromCssColorString(colorForType(r.type)).withAlpha(0.95);
 
-      const entity = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
-        billboard: {
-          image: plantSvg(colorForType(r.type)),
-          width: size, height: size, sizeInMeters: true,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      // 幹（プラス・マイナス共通）
+      const trunk = viewer.entities.add({
+        id: "trunk_" + r.id,
+        position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH / 2),
+        cylinder: {
+          length: trunkH, topRadius: 0.14 * scale, bottomRadius: 0.2 * scale,
+          material: Cesium.Color.fromCssColorString("#6b4a33"),
         },
       });
-      plantEntities.set(entity.id, r);
+
+      let canopy;
+      if (r.type === "negative") {
+        // マイナスの意見：針葉樹っぽい円錐の木（円柱のtopRadiusを0にすると円錐になる）
+        canopy = viewer.entities.add({
+          id: "canopy_" + r.id,
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 1.1),
+          cylinder: {
+            length: canopyR * 2.2, topRadius: 0, bottomRadius: canopyR,
+            material: canopyColor,
+          },
+        });
+      } else {
+        // プラスの意見：丸い広葉樹っぽい木
+        canopy = viewer.entities.add({
+          id: "canopy_" + r.id,
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 0.7),
+          ellipsoid: {
+            radii: new Cesium.Cartesian3(canopyR, canopyR, canopyR * 1.05),
+            material: canopyColor,
+            outline: false,
+          },
+        });
+      }
+      plantEntities.set(trunk.id, r);
+      plantEntities.set(canopy.id, r);
 
       if (isMine) {
         viewer.entities.add({
           id: "myring_" + r.id,
           position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
           ellipse: {
-            semiMinorAxis: size * 1.8, semiMajorAxis: size * 1.8,
+            semiMinorAxis: canopyR * 2.2, semiMajorAxis: canopyR * 2.2,
             material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.3),
             outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166"), outlineWidth: 2,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
@@ -512,16 +529,16 @@ function renderDebugLog() {
         });
         viewer.entities.add({
           id: "myaura_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + size * 0.6),
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 0.7),
           billboard: {
-            image: auraSvg(), width: size * 4, height: size * 4, sizeInMeters: true,
+            image: auraSvg(), width: canopyR * 4.5, height: canopyR * 4.5, sizeInMeters: true,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
       }
-      logDebug(`芽を生やした: id=${r.id} title=${r.title} type=${r.type}`);
+      logDebug(`木を生やした: id=${r.id} title=${r.title} type=${r.type}`);
     } catch (e) {
-      logDebug(`⚠️芽の生成に失敗: id=${r.id} エラー=${e && e.message}`);
+      logDebug(`⚠️木の生成に失敗: id=${r.id} エラー=${e && e.message}`);
     }
   }
 
@@ -551,7 +568,7 @@ function renderDebugLog() {
   }
 
   /* ============================================================
-     芽をタップして詳細を見る
+     木をタップして詳細を見る
      ============================================================ */
   const infoCard = document.getElementById("infoCard");
   let infoHideTimer = null;
@@ -559,7 +576,7 @@ function renderDebugLog() {
 
   // ★重要：CesiumのScreenSpaceEventHandlerは、同じイベント種類（LEFT_CLICK）に対して
   // 　setInputActionを複数回呼ぶと、後から登録した方が前のものを完全に上書きしてしまう。
-  // 　そのため「芽の詳細を見る」処理はここでは登録せず、ただの関数として定義しておき、
+  // 　そのため「木の詳細を見る」処理はここでは登録せず、ただの関数として定義しておき、
   // 　実際の登録は後方の「気になる場所を選ぶモード」セクションで、1つのハンドラにまとめて行う。
   function showInfoForTap(click) {
     const picked = viewer.scene.pick(click.position);
@@ -651,7 +668,7 @@ function renderDebugLog() {
     }
   }
 
-  // ここで唯一のLEFT_CLICKハンドラとして登録する（芽の詳細表示／場所選択、両方をここで分岐する）
+  // ここで唯一のLEFT_CLICKハンドラとして登録する（木の詳細表示／場所選択、両方をここで分岐する）
   pickHandler.setInputAction((click) => {
     if (!plantMode) {
       showInfoForTap(click);
