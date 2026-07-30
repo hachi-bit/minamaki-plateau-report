@@ -477,7 +477,9 @@ function renderDebugLog() {
       const isMine = r.reporterId === MY_REPORTER_ID;
       const scale = 0.85 + Math.random() * 0.3;
       const trunkH = 1.5 * scale;
-      const canopyR = 1.05 * scale;
+      const canopyR = 1.05 * scale;       // 樹冠の「横幅」の半径（丸い木の球の半径にも、円錐の底面半径にも使う）
+      const canopyHeight = canopyR * 2.2; // 樹冠の「高さ」。丸い木・円錐の木で共通の値にして、見た目の大きさを揃える
+      const canopyCenterY = groundH + trunkH + canopyHeight / 2; // 幹の上にぴったり乗るよう、どちらも同じ中心高さにする
       const canopyColor = Cesium.Color.fromCssColorString(colorForType(r.type)).withAlpha(0.95);
 
       // 幹（プラス・マイナス共通）
@@ -495,19 +497,19 @@ function renderDebugLog() {
         // マイナスの意見：針葉樹っぽい円錐の木（円柱のtopRadiusを0にすると円錐になる）
         canopy = viewer.entities.add({
           id: "canopy_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 1.1),
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
           cylinder: {
-            length: canopyR * 2.2, topRadius: 0, bottomRadius: canopyR,
+            length: canopyHeight, topRadius: 0, bottomRadius: canopyR,
             material: canopyColor,
           },
         });
       } else {
-        // プラスの意見：丸い広葉樹っぽい木
+        // プラスの意見：丸い広葉樹っぽい木（縦方向の半径をcanopyHeight/2にして、円錐と樹冠の高さを揃える）
         canopy = viewer.entities.add({
           id: "canopy_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 0.7),
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
           ellipsoid: {
-            radii: new Cesium.Cartesian3(canopyR, canopyR, canopyR * 1.05),
+            radii: new Cesium.Cartesian3(canopyR, canopyR, canopyHeight / 2),
             material: canopyColor,
             outline: false,
           },
@@ -529,7 +531,7 @@ function renderDebugLog() {
         });
         viewer.entities.add({
           id: "myaura_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + trunkH + canopyR * 0.7),
+          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
           billboard: {
             image: auraSvg(), width: canopyR * 4.5, height: canopyR * 4.5, sizeInMeters: true,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
