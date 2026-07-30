@@ -615,15 +615,62 @@ function renderDebugLog() {
   }
 
   function clearBubbles() {
-    activeBubbles.forEach((b) => b.el.remove());
+    activeBubbles.forEach((b) => {
+      b.el.remove();
+      if (b.balloonEntity) viewer.entities.remove(b.balloonEntity);
+      if (b.stringEntity) viewer.entities.remove(b.stringEntity);
+    });
     activeBubbles = [];
     bubbleLinesSvg.innerHTML = "";
   }
 
+  // ===== 風船の物理演算（バネ＋減衰付きの振り子） =====
+  const BALLOON_STRING_LEN = 1.3; // 紐の長さ（メートル）
+  const BALLOON_SPRING_K = 20;    // 元の位置に戻ろうとする力の強さ
+  const BALLOON_DAMPING = 3.0;    // 揺れが収まる速さ（大きいほど早く止まる）
+  let lastPhysicsTime = null;
+
+  // 風船を「つつく」：揺れの勢い（角速度）を追加する
+  function pokeBalloon(b, strength) {
+    b.swayVel += strength;
+  }
+
+  // 風船・紐の3D位置を、振り子の角度から計算して更新する
+  function updateBalloon3D(b, dtSec) {
+    if (!b.balloonEntity) return;
+
+    // バネ・減衰の物理積分（角度と角速度を少しずつ更新）
+    b.swayVel += (-BALLOON_SPRING_K * b.swayAngle - BALLOON_DAMPING * b.swayVel) * dtSec;
+    b.swayAngle += b.swayVel * dtSec;
+
+    const attachHeight = b.canopyCenterY + 1.1; // 紐の付け根＝木のてっぺん付近
+    const attachPos = Cesium.Cartesian3.fromDegrees(b.loc.lon, b.loc.lat, attachHeight);
+
+    // その地点の「東・上」方向ベクトルを求めて、その方向に振り子として揺らす
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(attachPos);
+    const east = Cesium.Matrix4.getColumn(enu, 0, new Cesium.Cartesian3());
+    const up = Cesium.Matrix4.getColumn(enu, 2, new Cesium.Cartesian3());
+
+    // 振り子の位置計算：付け根から「東方向にsinθ、上方向にcosθ」だけ紐の長さぶん離れた点が風船の中心
+    // （θ=0なら真上、傾くと左右に振れながらも常に付け根から一定距離を保つ）
+    const horiz = Cesium.Cartesian3.multiplyByScalar(east, BALLOON_STRING_LEN * Math.sin(b.swayAngle), new Cesium.Cartesian3());
+    const vert = Cesium.Cartesian3.multiplyByScalar(up, BALLOON_STRING_LEN * Math.cos(b.swayAngle), new Cesium.Cartesian3());
+
+    let balloonPos = Cesium.Cartesian3.add(attachPos, horiz, new Cesium.Cartesian3());
+    balloonPos = Cesium.Cartesian3.add(balloonPos, vert, new Cesium.Cartesian3());
+
+    b.balloonEntity.position = balloonPos;
+    b.stringEntity.polyline.positions = [attachPos, balloonPos];
+  }
+
   // 毎フレーム呼ばれる：①木の位置（アンカー）を再計算 → ②アンカーに向けてなめらかに寄せる
-  // → ③重なってたら押し合って避け合う → ④DOMに反映 → ⑤木への線を引き直す
+  // → ③重なってたら押し合って避け合う → ④DOMに反映 → ⑤木への線を引き直す → ⑥風船の物理演算
   function updateBubblePositions() {
-    if (activeBubbles.length === 0) return;
+    if (activeBubbles.length === 0) { lastPhysicsTime = null; return; }
+
+    const now = performance.now();
+    const dtSec = lastPhysicsTime === null ? 0 : Math.min((now - lastPhysicsTime) / 1000, 0.1); // 極端なdtは丸める
+    lastPhysicsTime = now;
 
     // ①②：アンカー位置の再計算と、目標地点への追従
     activeBubbles.forEach((b) => {
@@ -687,6 +734,9 @@ function renderDebugLog() {
       linesHtml += `<line x1="${b.cx}" y1="${bottomY}" x2="${b.anchor.x}" y2="${b.anchor.y}" stroke="#ffd166" stroke-width="1.4" stroke-opacity="0.7" stroke-dasharray="3,3" />`;
     });
     bubbleLinesSvg.innerHTML = linesHtml;
+
+    // ⑥：風船の物理演算（バネ・減衰付きの振り子運動）を進める
+    activeBubbles.forEach((b) => updateBalloon3D(b, dtSec));
   }
   viewer.scene.preRender.addEventListener(updateBubblePositions);
 
@@ -735,21 +785,46 @@ function renderDebugLog() {
       `;
       document.body.appendChild(el);
 
-      // 吹き出しを「つつく」と、プルンと揺れる（クリックのたびにclassを一旦外して再度付け直し、
-      // アニメーションを最初から再生し直せるようにする）
+      const rect = el.getBoundingClientRect();
+
+      // 風船（楕円体）と、木のてっぺんから風船まで伸びる紐（線）を3D空間に作る
+      const balloonColor = Cesium.Color.fromCssColorString(colorForType(item.r.type)).withAlpha(0.92);
+      const attachPos = Cesium.Cartesian3.fromDegrees(item.loc.lon, item.loc.lat, item.canopyCenterY + 1.1);
+      const balloonEntity = viewer.entities.add({
+        position: attachPos, // 初期位置。実際の位置は毎フレームupdateBalloon3Dで物理演算に基づいて更新される
+        ellipsoid: {
+          radii: new Cesium.Cartesian3(0.32, 0.32, 0.4),
+          material: balloonColor,
+          outline: true, outlineColor: Cesium.Color.WHITE.withAlpha(0.5),
+        },
+      });
+      const stringEntity = viewer.entities.add({
+        polyline: {
+          positions: [attachPos, attachPos],
+          width: 1.5,
+          material: Cesium.Color.WHITE.withAlpha(0.6),
+        },
+      });
+      plantEntities.set(balloonEntity.id, item.r); // 風船本体をタップしても詳細が見れるようにする
+
+      const bubbleState = {
+        el, loc: item.loc, canopyCenterY: item.canopyCenterY,
+        w: rect.width, h: rect.height,
+        cx: null, cy: null, anchor: { x: 0, y: 0 }, visible: true,
+        balloonEntity, stringEntity,
+        swayAngle: (Math.random() - 0.5) * 0.3, // 出現直後、少し揺れた状態から始めることで「ふわっと出た感」を出す
+        swayVel: (Math.random() - 0.5) * 1.2,
+      };
+      activeBubbles.push(bubbleState);
+
+      // 吹き出しを「つつく」と、プルンと揺れる（CSS側の演出）＋ 風船にも揺れの勢いを与える（3D物理演算側）
       const inner = el.querySelector(".bubbleInner");
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
         inner.classList.remove("poke");
         void inner.offsetWidth; // 強制的に再描画させて、アニメーションを最初からやり直せるようにする
         inner.classList.add("poke");
-      });
-
-      const rect = el.getBoundingClientRect();
-      activeBubbles.push({
-        el, loc: item.loc, canopyCenterY: item.canopyCenterY,
-        w: rect.width, h: rect.height,
-        cx: null, cy: null, anchor: { x: 0, y: 0 }, visible: true,
+        pokeBalloon(bubbleState, (Math.random() - 0.5) * 3.5);
       });
     });
 
