@@ -331,7 +331,13 @@ function renderDebugLog() {
   }
 
   flyHome(2);
-  document.getElementById("homeBtn").addEventListener("click", () => flyHome(1.5));
+  document.getElementById("homeBtn").addEventListener("click", () => {
+    if (typeof plantMode !== "undefined" && plantMode) {
+      logDebug('ホームボタンにより、投稿する場所を選ぶモードを強制的に終了しました');
+      exitPlantMode();
+    }
+    flyHome(1.5);
+  });
 
   let REFERENCE_GROUND_HEIGHT = 100;
   groundHeightAt(INITIAL_CAMERA.lat, INITIAL_CAMERA.lon).then((h) => {
@@ -651,12 +657,17 @@ function renderDebugLog() {
       showInfoForTap(click);
       return;
     }
+    logDebug('タップ検出（投稿する場所を選ぶモード中）');
     const ray = viewer.camera.getPickRay(click.position);
     if (!ray) return;
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-    if (!cartesian) return;
+    if (!cartesian) {
+      logDebug('⚠️地面の座標が取得できませんでした（空をタップした可能性）');
+      return;
+    }
     const carto = Cesium.Cartographic.fromCartesian(cartesian);
     pendingLoc = { lat: Cesium.Math.toDegrees(carto.latitude), lon: Cesium.Math.toDegrees(carto.longitude) };
+    logDebug('報告予定地点を設定: lat=' + pendingLoc.lat.toFixed(6) + ' lon=' + pendingLoc.lon.toFixed(6));
 
     if (previewEntity) viewer.entities.remove(previewEntity);
     previewEntity = viewer.entities.add({
