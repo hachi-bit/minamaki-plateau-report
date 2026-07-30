@@ -55,8 +55,6 @@
     background:var(--panel); border:1px solid rgba(255,209,102,0.5); border-radius:12px;
     padding:8px 11px; font-size:11px; line-height:1.5; backdrop-filter:blur(6px);
     pointer-events:none; z-index:24; opacity:0.96; }
-  .speechBubble::after{ content:""; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
-    border:7px solid transparent; border-top-color:var(--panel); }
   .speechBubble .tag{ display:inline-block; padding:1px 7px; border-radius:999px; font-size:9.5px;
     margin-bottom:3px; color:#0a0d16; font-weight:700; }
   .speechBubble .mine{ color:var(--accent); font-weight:700; font-size:10px; margin-top:3px; }
@@ -112,6 +110,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
+<svg id="bubbleLines" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:23;"></svg>
 <div id="loading"><div class="spin"></div><p>木になるマップを読み込んでいます…</p></div>
 
 <div id="hud">
@@ -583,11 +582,14 @@ function renderDebugLog() {
 
   /* ============================================================
      木をタップして、近くの投稿もまとめて吹き出しで見る
+     ・吹き出し同士が重なったら、当たり判定で少しずつ押し合って避け合う
+     ・吹き出しが木の真上からズレた場合に備えて、木の位置まで線を引いて繋がりを示す
      ============================================================ */
   const NEARBY_RADIUS_M = 6;   // この範囲内の投稿もまとめて吹き出しを出す
-  const MAX_BUBBLES = 6;       // 一度に出す吹き出しの上限（出しすぎ防止）
-  let activeBubbles = [];      // { el, loc, canopyCenterY }
+  const MAX_BUBBLES = 6;       // 一度に出す吹き出しの上限（多すぎると当たり判定の見た目も破綻するため）
+  let activeBubbles = [];      // { el, loc, canopyCenterY, w, h, cx, cy, anchor:{x,y}, visible }
   let bubbleHideTimer = null;
+  const bubbleLinesSvg = document.getElementById("bubbleLines");
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -605,19 +607,76 @@ function renderDebugLog() {
   function clearBubbles() {
     activeBubbles.forEach((b) => b.el.remove());
     activeBubbles = [];
+    bubbleLinesSvg.innerHTML = "";
   }
 
-  // 吹き出しを、対応する木の位置（画面座標）に毎フレーム追従させる
+  // 毎フレーム呼ばれる：①木の位置（アンカー）を再計算 → ②アンカーに向けてなめらかに寄せる
+  // → ③重なってたら押し合って避け合う → ④DOMに反映 → ⑤木への線を引き直す
   function updateBubblePositions() {
     if (activeBubbles.length === 0) return;
+
+    // ①②：アンカー位置の再計算と、目標地点への追従
     activeBubbles.forEach((b) => {
       const pos = Cesium.Cartesian3.fromDegrees(b.loc.lon, b.loc.lat, b.canopyCenterY + 1.1);
       const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
-      if (!win) { b.el.style.display = "none"; return; }
-      b.el.style.display = "";
-      b.el.style.left = win.x + "px";
-      b.el.style.top = win.y + "px";
+      b.visible = !!win;
+      if (!win) return;
+      b.anchor = win;
+      const targetX = win.x;
+      const targetY = win.y - b.h / 2 - 16; // 吹き出しの下端が、木より少し上に来る位置を目標にする
+      if (b.cx === null) {
+        // 初回はいきなりその場に出す（なめらかに動かす必要はない）
+        b.cx = targetX;
+        b.cy = targetY;
+      } else {
+        // 2回目以降は、目標地点に向けて少しずつ近づける（バネのような動き）
+        b.cx += (targetX - b.cx) * 0.25;
+        b.cy += (targetY - b.cy) * 0.25;
+      }
     });
+
+    // ③：重なり回避（総当たりで押し合う。最大6件なので毎フレームでも軽い）
+    const ITERATIONS = 4;
+    for (let iter = 0; iter < ITERATIONS; iter++) {
+      for (let i = 0; i < activeBubbles.length; i++) {
+        for (let j = i + 1; j < activeBubbles.length; j++) {
+          const a = activeBubbles[i], b = activeBubbles[j];
+          if (!a.visible || !b.visible) continue;
+          const dx = b.cx - a.cx, dy = b.cy - a.cy;
+          const overlapX = (a.w + b.w) / 2 - Math.abs(dx) + 10; // 10pxの余白を持たせる
+          const overlapY = (a.h + b.h) / 2 - Math.abs(dy) + 10;
+          if (overlapX > 0 && overlapY > 0) {
+            // 重なりが小さい軸の方向に、お互い半分ずつ押し出す
+            if (overlapX < overlapY) {
+              const push = overlapX / 2 * (dx >= 0 ? 1 : -1);
+              a.cx -= push; b.cx += push;
+            } else {
+              const push = overlapY / 2 * (dy >= 0 ? 1 : -1);
+              a.cy -= push; b.cy += push;
+            }
+          }
+        }
+      }
+    }
+
+    // ④：DOMへ反映
+    // ★cx/cyは「吹き出しの中心」で計算してきたが、CSS側は translate(-50%,-100%) で
+    // 　「底辺中央」を基準に配置する作りなので、ここで底辺中央の座標に変換する
+    activeBubbles.forEach((b) => {
+      b.el.style.display = b.visible ? "" : "none";
+      if (!b.visible) return;
+      b.el.style.left = b.cx + "px";
+      b.el.style.top = (b.cy + b.h / 2) + "px";
+    });
+
+    // ⑤：木への接続線を引き直す（吹き出しの底辺中央から、木の位置まで）
+    let linesHtml = "";
+    activeBubbles.forEach((b) => {
+      if (!b.visible) return;
+      const bottomY = b.cy + b.h / 2;
+      linesHtml += `<line x1="${b.cx}" y1="${bottomY}" x2="${b.anchor.x}" y2="${b.anchor.y}" stroke="#ffd166" stroke-width="1.4" stroke-opacity="0.7" stroke-dasharray="3,3" />`;
+    });
+    bubbleLinesSvg.innerHTML = linesHtml;
   }
   viewer.scene.preRender.addEventListener(updateBubblePositions);
 
@@ -655,6 +714,7 @@ function renderDebugLog() {
       const mine = item.r.reporterId === MY_REPORTER_ID ? `<div class="mine">★あなたの投稿</div>` : "";
       const el = document.createElement("div");
       el.className = "speechBubble";
+      el.style.left = "-9999px"; // サイズ計測用に、まず画面外に置いてから配置する
       el.innerHTML = `
         <span class="tag" style="background:${colorForType(item.r.type)}">${labelForType(item.r.type)}</span>
         <div class="titleLine">${escapeHtml(item.r.title || "")}</div>
@@ -662,7 +722,12 @@ function renderDebugLog() {
         ${mine}
       `;
       document.body.appendChild(el);
-      activeBubbles.push({ el, loc: item.loc, canopyCenterY: item.canopyCenterY });
+      const rect = el.getBoundingClientRect();
+      activeBubbles.push({
+        el, loc: item.loc, canopyCenterY: item.canopyCenterY,
+        w: rect.width, h: rect.height,
+        cx: null, cy: null, anchor: { x: 0, y: 0 }, visible: true,
+      });
     });
 
     updateBubblePositions();
