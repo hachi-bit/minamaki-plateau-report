@@ -517,19 +517,18 @@ function renderDebugLog() {
 
   // 破片（デブリ）を、飛び散る物理的な動き（初速＋重力）付きで生成する
   // ・隕石が砕ける時にも、建物が壊れる時にも、両方これを使い回す
-  const GRAVITY = 4; // ゆっくり舞って、ゆっくり落ちる（弱め）
+  const GRAVITY = 3; // さらに弱めて、ゆったり舞い上がるようにした
   function spawnDebris(originLon, originLat, originHeight, count, baseSize, colors) {
     const fragments = [];
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 4 + Math.random() * 6;
-      const upSpeed = 5 + Math.random() * 7;
-      const size = baseSize * (0.5 + Math.random() * 0.8) * 2;
+      // ★横方向の勢いを弱め、真上方向を主体にした「噴き上がる」軌道にする。
+      // 　真上に飛ばせば、周りの建物の壁を横切らず開けた空へ向かうので、
+      // 　遮られて見えなくなる可能性がさらに下がる（ビルボード化との合わせ技）。
+      const speed = 1 + Math.random() * 2.5;   // 横方向はごく控えめに
+      const upSpeed = 8 + Math.random() * 8;   // 上方向をしっかり強めに
+      const size = baseSize * (0.6 + Math.random() * 0.8) * 3; // さらに大きめに
       const color = colors[Math.floor(Math.random() * colors.length)];
-      // ★立体（box）だと、周りに残ってる他の建物の裏に隠れてしまい、
-      // 　密集した街中では実質見えなくなることが分かった（ログでは正常に動いてるのに、
-      // 　画面には映らない、という状態から特定）。
-      // 　常に手前に描画されるビルボード（板）に変更して、確実に見えるようにする。
       const entity = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight),
         billboard: {
@@ -602,16 +601,34 @@ function renderDebugLog() {
   // 　この「広さの目安 × 高さ」で、低くて広い建物・高くて狭い建物、どちらも
   // 　それらしい体積感で破片の量に反映されるようにしている。
   function blastBuildingsAt(lon, lat, radiusM) {
-    const samplePoints = [{ lon, lat }];
-    const rings = 3;
+    // ★以前は「輪の数=3固定」で、常に37点しかサンプリングしてなかった。
+    // 　範囲を広げても点の数が増えへんかったから、点と点の間に建物が
+    // 　すっぽり収まって見逃される、ということが起きてた。
+    // 　点と点の「間隔」を一定に保つようにして、範囲が広い時は自動で点数も増やす。
+    const SAMPLE_SPACING_M = 5;     // この間隔ごとに1点をサンプリングする目安
+    const MAX_SAMPLE_POINTS = 900;  // 重くなりすぎないための上限（超えたら間引く）
+
+    let samplePoints = [{ lon, lat }];
+    const rings = Math.max(3, Math.round(radiusM / SAMPLE_SPACING_M));
     for (let ring = 1; ring <= rings; ring++) {
       const dist = (radiusM / rings) * ring;
-      const pointsInRing = 6 * ring;
+      const circumference = 2 * Math.PI * dist;
+      const pointsInRing = Math.max(6, Math.round(circumference / SAMPLE_SPACING_M));
       for (let i = 0; i < pointsInRing; i++) {
         const angle = (i / pointsInRing) * Math.PI * 2;
         samplePoints.push(offsetLatLon(lat, lon, angle, dist));
       }
     }
+    if (samplePoints.length > MAX_SAMPLE_POINTS) {
+      // 上限を超えたら、均等に間引いて件数を抑える（多少荒くなるが、動作の重さを優先する）
+      const step = samplePoints.length / MAX_SAMPLE_POINTS;
+      const thinned = [];
+      for (let i = 0; i < MAX_SAMPLE_POINTS; i++) thinned.push(samplePoints[Math.floor(i * step)]);
+      samplePoints = thinned;
+      logDebug(`☄️範囲が広いため、サンプリング点を${MAX_SAMPLE_POINTS}点に間引きました（元は${Math.round(rings)}輪ぶん）`);
+    }
+    logDebug(`☄️サンプリング点数: ${samplePoints.length}点（半径${radiusM}m）`);
+
     const areaPerSample = (Math.PI * radiusM * radiusM) / samplePoints.length; // 1サンプル点あたりが代表する面積(m²)の目安
 
     // まず全サンプル点をピックして、建物ごとに「何回当たったか」「どのあたりにあるか」を集計する
@@ -650,7 +667,7 @@ function renderDebugLog() {
       const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
       const fragSize = Math.max(1.8, Math.min(7, scaleFactor / 4));
       const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
-      animateDebris(debris, 4200);
+      animateDebris(debris, 6000);
     });
     logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にし、体積の目安に応じた破片を飛び散らせました（半径${radiusM}m目安）`);
   }
@@ -819,7 +836,7 @@ function renderDebugLog() {
     // 隕石自身も、着弾で岩の破片となって飛び散る
     const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.9,
       ["#3d2b20", "#5a4030", "#ff9d3f"]);
-    animateDebris(meteorDebris, 4200);
+    animateDebris(meteorDebris, 6000);
 
     shakeCamera(350, 14);
     blastBuildingsAt(lon, lat, blastRadius);
