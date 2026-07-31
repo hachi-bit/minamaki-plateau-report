@@ -158,6 +158,7 @@
   <button class="iconBtn" id="infoBtn" title="見方">❔</button>
   <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
   <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
+  <button class="iconBtn" id="buildingToggleBtn" title="建物の表示切り替え">🏢</button>
   <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
   <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
 </div>
@@ -215,7 +216,14 @@ const INITIAL_CAMERA = { lon: 139.525347, lat: 35.450514, height: 259.7, heading
 // 　LOD2はLOD1より整備エリアが狭いことが多く、このエリア（住宅地）に存在するかは
 // 　ここからは確認しきれなかったため、実際に試して確認する想定。
 // 　もし読み込みに失敗しても、コードはエラーを無視して黙ってスキップするだけなので安全。
-const USE_TEXTURED_LOD2 = true; // true にすると、下のLOD2テクスチャ付きURLを試せる
+// ★2026-07 検証結果：みなまき周辺（旭区・泉区）では、LOD2テクスチャ付きのtileset.json自体は
+// 　読み込みに成功する（＝URLとしては存在する）が、実際の建物ジオメトリが入っておらず、
+// 　建物が何も表示されないことを確認した。おそらくPLATEAUのcomposite_url機構が、
+// 　該当データが無くてもエラーにはせず「空のtileset.json」を返しているためと思われる。
+// 　範囲（bounding volume）による自動判定も、この「空だが有効」なケースは検出できなかった。
+// 　→ このエリアでは当面 false（LOD1）で運用する。将来、整備範囲が広がった際に
+// 　　再度trueにして試す価値はある。
+const USE_TEXTURED_LOD2 = false;
 
 const BUILDING_URLS_LOD1 = [
   'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json', // 旭区
@@ -427,6 +435,18 @@ function renderDebugLog() {
     camPanelOpen = !camPanelOpen;
     camPanel.classList.toggle("show", camPanelOpen);
   });
+
+  /* ============================================================
+     🏢 建物の表示切り替え（オフにすると、地理院タイルの航空写真＝実際の屋根が見える）
+     ============================================================ */
+  let buildingsVisible = true;
+  document.getElementById("buildingToggleBtn").addEventListener("click", (e) => {
+    buildingsVisible = !buildingsVisible;
+    tilesets.forEach((ts) => { ts.show = buildingsVisible; });
+    e.currentTarget.classList.toggle("active", !buildingsVisible);
+    logDebug(`建物の表示: ${buildingsVisible ? "ON" : "OFF"}`);
+  });
+
   function updateCamPanel() {
     if (!camPanelOpen) return;
     const p = viewer.camera.positionCartographic;
