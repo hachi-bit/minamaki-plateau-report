@@ -494,7 +494,6 @@ function renderDebugLog() {
       const loc = offsetLatLon(r.lat, r.lon, j.angle, j.dist);
       const groundH = await groundHeightAt(loc.lat, loc.lon);
       addDebugPillar(loc.lat, loc.lon, groundH, colorForType(r.type));
-      const isMine = r.reporterId === MY_REPORTER_ID;
       const scale = 0.85 + Math.random() * 0.3;
       const trunkH = 1.5 * scale;
       const canopyR = 1.05 * scale;       // 樹冠の「横幅」の半径（丸い木の球の半径にも、円錐の底面半径にも使う）
@@ -538,34 +537,9 @@ function renderDebugLog() {
       plantEntities.set(trunk.id, r);
       plantEntities.set(canopy.id, r);
 
-      if (isMine) {
-        // ★輪っか・オーラは木本体を目立たせる演出だが、大きすぎると
-        // 　近くにある「別の木」のタップ判定まで覆ってしまう（実際に発生したバグ）。
-        // 　見た目の「光ってる感」を保ちつつ、範囲を樹冠のすぐ外側程度に抑える。
-        const ring = viewer.entities.add({
-          id: "myring_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
-          ellipse: {
-            semiMinorAxis: canopyR * 1.3, semiMajorAxis: canopyR * 1.3,
-            material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.3),
-            outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166"), outlineWidth: 2,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          },
-        });
-        const aura = viewer.entities.add({
-          id: "myaura_" + r.id,
-          position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
-          billboard: {
-            image: auraSvg(), width: canopyR * 2.4, height: canopyR * 2.4, sizeInMeters: true,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        });
-        // ★オーラ・輪っかも木本体と同じ記録に紐づけておかないと、
-        // 　光ってる部分をタップした時に「plantEntitiesに記録がない」扱いになり、
-        // 　詳細カードが出ないバグになる（自分の投稿だけ反応しない、という形で発覚した）
-        plantEntities.set(ring.id, r);
-        plantEntities.set(aura.id, r);
-      }
+      // ★「自分の投稿」を光らせる演出（輪っか・オーラ）は無効化した。
+      // 　同じ「かすみがかった」ビルボード表現（auraSvg）は、代わりに
+      // 　「一覧範囲の表示」「選択中の投稿の表示」の方に、大きさ違いで使い回している。
       plantedList.push({ r, loc, canopyCenterY, groundH, canopyR });
       logDebug(`木を生やした: id=${r.id} title=${r.title} type=${r.type}`);
     } catch (e) {
@@ -723,9 +697,8 @@ function renderDebugLog() {
      ============================================================ */
   const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
   let listPanelOpen = false;
-  let selectionCylinderInner = null;
-  let selectionCylinderOuter = null;
-  let searchRadiusEntity = null;
+  let selectionAuraEntity = null;
+  let searchRadiusAuraEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -740,56 +713,39 @@ function renderDebugLog() {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   }
 
-  // 選んだ投稿の場所を、輪郭のクッキリしない「ふわっと透けた」円柱2重がけで示す
-  // ★色について：
-  // 　・金色(#ffd166)は「自分の投稿」やUI全体のアクセントカラーと同じ意味で既に使っていて、
-  // 　　選択中の意味と混同するため避けた
-  // 　・緑・茶色は木の種類（プラス／マイナス）の意味で使用中のため避けた
-  // 　・このアプリでまだ使っていない「空色」を採用。意味を持たない中立色なので、
-  // 　　「注目・選択中」という一時的な状態を表すのに適していると判断した
-  // ★輪郭線（outline）を付けると縁がクッキリして「ふわっと」感が失われるため、あえて付けない。
-  // 　代わりに「外側は広く・薄く」「内側は狭く・少し濃く」の2重にして、グラデーションのような
-  // 　柔らかい光り方に近づけている
-  const SELECTION_COLOR = "#38bdf8"; // 空色
+  // 選んだ投稿・一覧の範囲を示す表現は、どちらも「自分の投稿」を示すのに使ってた
+  // かすみがかったオーラ（auraSvg）の使い回し。あちらは無効化した代わりに、
+  // こちらでサイズ違いとして再利用する形にした。
+  // ★色は auraSvg 自体が金系の柔らかいグラデーションなので、そのまま踏襲している
+  //   （地面の円盤だと、建物や地形の起伏で埋もれる可能性があったため、
+  //    "浮かせて表示するビルボード" のこの表現に変更した）
   function showSelectionGlow(loc, groundH) {
     clearSelectionGlow();
-    const len = 30; // 前回の約2倍の高さにした
-    selectionCylinderOuter = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
-      cylinder: {
-        length: len, topRadius: 2.6, bottomRadius: 2.6,
-        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.12),
-      },
-    });
-    selectionCylinderInner = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
-      cylinder: {
-        length: len, topRadius: 1.1, bottomRadius: 1.1,
-        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.28),
+    selectionAuraEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 6),
+      billboard: {
+        image: auraSvg(), width: 8, height: 8, sizeInMeters: true,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
   }
   function clearSelectionGlow() {
-    if (selectionCylinderInner) { viewer.entities.remove(selectionCylinderInner); selectionCylinderInner = null; }
-    if (selectionCylinderOuter) { viewer.entities.remove(selectionCylinderOuter); selectionCylinderOuter = null; }
+    if (selectionAuraEntity) { viewer.entities.remove(selectionAuraEntity); selectionAuraEntity = null; }
   }
 
-  // 一覧に集めている範囲（NEARBY_RADIUS_M）を、地面の薄い円盤で可視化する
+  // 一覧に集めている範囲（NEARBY_RADIUS_M）も、同じオーラ表現を大きくして示す
   function showSearchRadiusCircle(loc, groundH) {
     clearSearchRadiusCircle();
-    searchRadiusEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.1),
-      ellipse: {
-        semiMinorAxis: NEARBY_RADIUS_M, semiMajorAxis: NEARBY_RADIUS_M,
-        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.08),
-        outline: true, outlineColor: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.5),
-        outlineWidth: 1,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    searchRadiusAuraEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 3),
+      billboard: {
+        image: auraSvg(), width: NEARBY_RADIUS_M * 2.2, height: NEARBY_RADIUS_M * 2.2, sizeInMeters: true,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
   }
   function clearSearchRadiusCircle() {
-    if (searchRadiusEntity) { viewer.entities.remove(searchRadiusEntity); searchRadiusEntity = null; }
+    if (searchRadiusAuraEntity) { viewer.entities.remove(searchRadiusAuraEntity); searchRadiusAuraEntity = null; }
   }
 
   function openListPanel(centerItem) {
@@ -848,12 +804,24 @@ function renderDebugLog() {
   // 　実際の登録は後方の「気になる場所を選ぶモード」セクションで、1つのハンドラにまとめて行う。
   function showInfoForTap(click) {
     const picked = viewer.scene.pick(click.position);
-    if (!picked || !picked.id) return;
-    const r = plantEntities.get(picked.id.id);
-    if (!r) return;
-    const tapped = plantedList.find((p) => p.r.id === r.id);
-    if (!tapped) return;
-    openListPanel(tapped);
+    if (picked && picked.id) {
+      const r = plantEntities.get(picked.id.id);
+      if (r) {
+        const tapped = plantedList.find((p) => p.r.id === r.id);
+        if (tapped) { openListPanel(tapped); return; }
+      }
+    }
+
+    // 木や地物に当たらなかった場合も、タップした地面の座標を拾って、そこを中心に一覧を開く
+    const ray = viewer.camera.getPickRay(click.position);
+    if (!ray) return;
+    const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+    if (!cartesian) return; // 空をタップした場合等は何もしない
+    const carto = Cesium.Cartographic.fromCartesian(cartesian);
+    const loc = { lat: Cesium.Math.toDegrees(carto.latitude), lon: Cesium.Math.toDegrees(carto.longitude) };
+    groundHeightAt(loc.lat, loc.lon).then((groundH) => {
+      openListPanel({ loc, groundH });
+    });
   }
 
 
