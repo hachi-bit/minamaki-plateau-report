@@ -591,8 +591,7 @@ function renderDebugLog() {
      ・最近表示したものは避けて選ぶことで、特定の木ばかり出る偏りを防ぐ
      ・一覧パネルが開いてる間は邪魔になるので止める
      ============================================================ */
-  const MAX_CONCURRENT_TITLES = 9;  // 密集してる場所ほど賑やかに見えるよう、上限を増やした
-  const MIN_SCREEN_GAP_PX = 100; // 同時に出す時、これより近い組み合わせは避ける
+  const MAX_CONCURRENT_TITLES = 12; // 密集してる場所ほど賑やかに見えるよう、上限を増やした（縦積みで対応するため）
   const TICKER_DURATION_MS = 11000; // 表示している時間（フェードイン〜フェードアウトの合計）。ゆっくり漂うように長めにした
   const TICKER_RISE_PX = 180;       // この間に、画面上でどれだけ上に浮かび上がるか（以前の約3倍）
   let activeFloatingTitles = []; // { el, loc, height, startTime, recordId, lastWinX, lastWinY }
@@ -618,16 +617,9 @@ function renderDebugLog() {
     const candidates = pickInViewCandidates();
     if (candidates.length === 0) return null;
 
+    // 既に表示中の木は、同じものを二重に出さないようにするだけ（近いから弾く、はもうしない）
     const activeIds = new Set(activeFloatingTitles.map((t) => t.recordId));
-    let pool = candidates.filter((c) => !activeIds.has(c.p.r.id));
-
-    pool = pool.filter((c) => {
-      return !activeFloatingTitles.some((t) => {
-        const dx = c.win.x - t.lastWinX, dy = c.win.y - t.lastWinY;
-        return Math.hypot(dx, dy) < MIN_SCREEN_GAP_PX;
-      });
-    });
-
+    const pool = candidates.filter((c) => !activeIds.has(c.p.r.id));
     if (pool.length === 0) return null;
 
     pool.sort((a, b) => (lastShownTime.get(a.p.r.id) || 0) - (lastShownTime.get(b.p.r.id) || 0));
@@ -642,12 +634,24 @@ function renderDebugLog() {
     el.textContent = `${icon} ${p.r.title}`;
     document.body.appendChild(el);
 
+    // 近い場所から複数出す時は、横に並べて弾くのではなく「縦に積み上げて」重なりを避ける
+    // （同じ木の周辺から次々出ても、上下に連なって見えるようにするため）
+    const posNow = Cesium.Cartesian3.fromDegrees(p.loc.lon, p.loc.lat, p.canopyCenterY);
+    const winNow = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, posNow);
+    let stackLevel = 0;
+    if (winNow) {
+      activeFloatingTitles.forEach((t) => {
+        if (Math.abs(t.lastWinX - winNow.x) < 90) stackLevel++;
+      });
+    }
+
     lastShownTime.set(p.r.id, performance.now());
     activeFloatingTitles.push({
       el, loc: p.loc,
       height: p.canopyCenterY + 1.1, // 木のてっぺん付近から立ち上らせる
       startTime: performance.now(), recordId: p.r.id,
-      lastWinX: -9999, lastWinY: -9999,
+      lastWinX: winNow ? winNow.x : -9999, lastWinY: winNow ? winNow.y : -9999,
+      stackOffset: stackLevel * 46, // 積み上げ分、最初から少し高い位置から始める（px）
     });
   }
 
@@ -674,7 +678,7 @@ function renderDebugLog() {
       else if (t > 0.7) opacity = Math.max(0, (1 - t) / 0.3);
       else opacity = 1;
 
-      const rise = TICKER_RISE_PX * t; // 時間とともに、じわじわ上へ
+      const rise = TICKER_RISE_PX * t + (ft.stackOffset || 0); // 時間とともに、じわじわ上へ＋積み上げ分
 
       ft.el.style.display = "block";
       ft.el.style.left = win.x + "px";
