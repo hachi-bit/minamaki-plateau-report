@@ -723,7 +723,9 @@ function renderDebugLog() {
      ============================================================ */
   const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
   let listPanelOpen = false;
-  let selectionCylinderEntity = null;
+  let selectionCylinderInner = null;
+  let selectionCylinderOuter = null;
+  let searchRadiusEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -738,26 +740,61 @@ function renderDebugLog() {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   }
 
-  // 選んだ投稿の場所を、半透明の円柱でやんわりと分かりやすく示す
-  // （以前試した「光の柱」は主張が強すぎ、その後の「オーラ」は逆に見えにくかったため、
-  // 　半透明の円柱という、間を取った表現にした）
+  // 選んだ投稿の場所を、輪郭のクッキリしない「ふわっと透けた」円柱2重がけで示す
+  // ★色について：
+  // 　・金色(#ffd166)は「自分の投稿」やUI全体のアクセントカラーと同じ意味で既に使っていて、
+  // 　　選択中の意味と混同するため避けた
+  // 　・緑・茶色は木の種類（プラス／マイナス）の意味で使用中のため避けた
+  // 　・このアプリでまだ使っていない「空色」を採用。意味を持たない中立色なので、
+  // 　　「注目・選択中」という一時的な状態を表すのに適していると判断した
+  // ★輪郭線（outline）を付けると縁がクッキリして「ふわっと」感が失われるため、あえて付けない。
+  // 　代わりに「外側は広く・薄く」「内側は狭く・少し濃く」の2重にして、グラデーションのような
+  // 　柔らかい光り方に近づけている
+  const SELECTION_COLOR = "#38bdf8"; // 空色
   function showSelectionGlow(loc, groundH) {
     clearSelectionGlow();
-    const len = 14, r = 1.4;
-    selectionCylinderEntity = viewer.entities.add({
+    const len = 30; // 前回の約2倍の高さにした
+    selectionCylinderOuter = viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
       cylinder: {
-        length: len, topRadius: r, bottomRadius: r,
-        material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.35),
-        outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.75),
+        length: len, topRadius: 2.6, bottomRadius: 2.6,
+        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.12),
+      },
+    });
+    selectionCylinderInner = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
+      cylinder: {
+        length: len, topRadius: 1.1, bottomRadius: 1.1,
+        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.28),
       },
     });
   }
   function clearSelectionGlow() {
-    if (selectionCylinderEntity) { viewer.entities.remove(selectionCylinderEntity); selectionCylinderEntity = null; }
+    if (selectionCylinderInner) { viewer.entities.remove(selectionCylinderInner); selectionCylinderInner = null; }
+    if (selectionCylinderOuter) { viewer.entities.remove(selectionCylinderOuter); selectionCylinderOuter = null; }
+  }
+
+  // 一覧に集めている範囲（NEARBY_RADIUS_M）を、地面の薄い円盤で可視化する
+  function showSearchRadiusCircle(loc, groundH) {
+    clearSearchRadiusCircle();
+    searchRadiusEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.1),
+      ellipse: {
+        semiMinorAxis: NEARBY_RADIUS_M, semiMajorAxis: NEARBY_RADIUS_M,
+        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.08),
+        outline: true, outlineColor: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.5),
+        outlineWidth: 1,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+  }
+  function clearSearchRadiusCircle() {
+    if (searchRadiusEntity) { viewer.entities.remove(searchRadiusEntity); searchRadiusEntity = null; }
   }
 
   function openListPanel(centerItem) {
+    showSearchRadiusCircle(centerItem.loc, centerItem.groundH);
+
     const nearby = plantedList
       .map((p) => ({ p, dist: metersBetween(p.loc, centerItem.loc) }))
       .filter((x) => x.dist <= NEARBY_RADIUS_M)
@@ -801,6 +838,7 @@ function renderDebugLog() {
     document.getElementById("listPanel").classList.remove("show");
     listPanelOpen = false;
     clearSelectionGlow();
+    clearSearchRadiusCircle();
   }
   document.getElementById("listPanelCloseBtn").addEventListener("click", closeListPanel);
 
