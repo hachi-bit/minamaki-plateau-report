@@ -522,23 +522,32 @@ function renderDebugLog() {
     const fragments = [];
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      // ★横方向の勢いを弱め、真上方向を主体にした「噴き上がる」軌道にする。
-      // 　真上に飛ばせば、周りの建物の壁を横切らず開けた空へ向かうので、
-      // 　本物の立体（box）でも建物に隠れて見えなくなりにくいはず、という狙い。
       const speed = 1 + Math.random() * 2.5;   // 横方向はごく控えめに
       const upSpeed = 8 + Math.random() * 8;   // 上方向をしっかり強めに
       const size = baseSize * (0.6 + Math.random() * 0.8) * 3;
       const color = colors[Math.floor(Math.random() * colors.length)];
       const dims = new Cesium.Cartesian3(size, size * (0.7 + Math.random() * 0.5), size * (0.7 + Math.random() * 0.5));
+      const startPos = Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight);
       const entity = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight),
+        position: startPos,
         box: {
           dimensions: dims, material: Cesium.Color.fromCssColorString(color),
           outline: true, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1,
         },
       });
+      // ★隕石と同じ理由：本物の立体（box）だけだと建物に隠れて見えなくなることがある。
+      // 　隕石で効果があった「常に手前に描画される小さいグロー」を、破片1個1個にも
+      // 　同じように付け、見た目のリアルさ（立体）と確実な視認性、両方を確保する。
+      const glowSize = size * 1.4;
+      const glow = viewer.entities.add({
+        position: startPos,
+        billboard: {
+          image: auraSvg(), width: glowSize, height: glowSize, sizeInMeters: true,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
       fragments.push({
-        entity, lon: originLon, lat: originLat, baseHeight: originHeight,
+        entity, glow, lon: originLon, lat: originLat, baseHeight: originHeight,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, vz: upSpeed,
         spinSeed: Math.random() * 1000,
       });
@@ -557,7 +566,10 @@ function renderDebugLog() {
         firstTick = false;
       }
       if (elapsed >= lifetimeMs) {
-        fragments.forEach((f) => viewer.entities.remove(f.entity));
+        fragments.forEach((f) => {
+          viewer.entities.remove(f.entity);
+          if (f.glow) viewer.entities.remove(f.glow);
+        });
         logDebug(`💥破片アニメーション終了・削除しました`);
         return;
       }
@@ -575,6 +587,7 @@ function renderDebugLog() {
         f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
           pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
         );
+        if (f.glow) f.glow.position = pos;
       });
       requestAnimationFrame(tick);
     }
