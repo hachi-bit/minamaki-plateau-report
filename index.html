@@ -566,14 +566,27 @@ function renderDebugLog() {
   // 隕石の落下→着弾→爆発パーティクル、の一連の演出
   async function strikeMeteor(lat, lon) {
     const groundH = await groundHeightAt(lat, lon);
-    const startHeight = groundH + 400;
-    const durationMs = 900;
+    // ★以前は+400mから落としてたけど、カメラが斜め下を見てる時は画面の外（視界外）に
+    // 　なってしまい、見えないまま終わってた。もっと低い位置から落とすようにする。
+    const startHeight = groundH + 120;
+    const durationMs = 1400;
+    const glowSize = meteorSize * 4; // 本体だけやと小さく見えにくいので、グローを大きめにして目立たせる
 
     const meteorEntity = viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, startHeight),
       ellipsoid: {
         radii: new Cesium.Cartesian3(meteorSize, meteorSize, meteorSize),
         material: Cesium.Color.fromCssColorString("#ff6b35").withAlpha(0.95),
+      },
+    });
+    // ★風船の時と同じ教訓：実体（ellipsoid）だけだと奥にあるものに埋もれたり、
+    // 　距離によっては小さく見えにくかったりする。常に手前に光るビルボードを重ねて、
+    // 　絶対に見失わないようにする。
+    const meteorGlow = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, startHeight),
+      billboard: {
+        image: fireGlowSvg(), width: glowSize, height: glowSize, sizeInMeters: true,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
 
@@ -588,12 +601,15 @@ function renderDebugLog() {
         // 加速しながら落ちる（イーズイン）
         const eased = t * t;
         const h = startHeight - (startHeight - groundH) * eased;
-        meteorEntity.position = Cesium.Cartesian3.fromDegrees(lon, lat, h);
+        const pos = Cesium.Cartesian3.fromDegrees(lon, lat, h);
+        meteorEntity.position = pos;
+        meteorGlow.position = pos;
         requestAnimationFrame(fall);
       }
       requestAnimationFrame(fall);
     });
     viewer.entities.remove(meteorEntity);
+    viewer.entities.remove(meteorGlow);
 
     // 爆発パーティクル
     const burstPos = Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 2);
@@ -720,6 +736,21 @@ function renderDebugLog() {
       + `<stop offset="100%" stop-color="#ffd166" stop-opacity="0"/>`
       + `</radialGradient></defs>`
       + `<circle cx="60" cy="60" r="60" fill="url(#g)"/>`
+      + `</svg>`
+    );
+  }
+
+  // 隕石本体用の、燃えるオレンジ色のグロー（常に手前に描画して、絶対に見失わないようにする）
+  function fireGlowSvg() {
+    return 'data:image/svg+xml,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">`
+      + `<defs><radialGradient id="fg" cx="50%" cy="50%" r="50%">`
+      + `<stop offset="0%" stop-color="#fff3c4" stop-opacity="1"/>`
+      + `<stop offset="35%" stop-color="#ff9d3f" stop-opacity="0.9"/>`
+      + `<stop offset="70%" stop-color="#ff6b35" stop-opacity="0.5"/>`
+      + `<stop offset="100%" stop-color="#ff6b35" stop-opacity="0"/>`
+      + `</radialGradient></defs>`
+      + `<circle cx="60" cy="60" r="60" fill="url(#fg)"/>`
       + `</svg>`
     );
   }
