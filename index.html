@@ -180,7 +180,7 @@
 <div id="meteorPanel">
   <div style="font-size:11px;color:var(--sub);margin-bottom:8px;">☄️ 隕石の設定</div>
   <label class="meteorSliderLabel">隕石の大きさ <span id="meteorSizeVal"></span>m（爆発範囲もこれに連動）</label>
-  <input type="range" id="meteorSizeSlider" min="1" max="10" value="4" />
+  <input type="range" id="meteorSizeSlider" min="1" max="30" value="4" />
 </div>
 
 <div id="debugLogPanel">
@@ -517,14 +517,14 @@ function renderDebugLog() {
 
   // 破片（デブリ）を、飛び散る物理的な動き（初速＋重力）付きで生成する
   // ・隕石が砕ける時にも、建物が壊れる時にも、両方これを使い回す
-  const GRAVITY = 5; // ★かなりゆっくりにしたいので、重力も弱めた（以前は15）
+  const GRAVITY = 4; // ゆっくり舞って、ゆっくり落ちる（弱め）
   function spawnDebris(originLon, originLat, originHeight, count, baseSize, colors) {
     const fragments = [];
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = (1.5 + Math.random() * 3.5) * 0.5; // ★速度を半分以下に落として、ゆっくり飛び散るようにした
-      const upSpeed = (2 + Math.random() * 4) * 0.5;
-      const size = baseSize * (0.4 + Math.random() * 0.8) * 2; // ★サイズを2倍に
+      const speed = 4 + Math.random() * 6;   // ★「ゆっくり」を意識しすぎて動かなさすぎたので、飛距離は出しつつ滞空時間で"ゆっくり感"を出す方針にした
+      const upSpeed = 5 + Math.random() * 7;
+      const size = baseSize * (0.4 + Math.random() * 0.8) * 2;
       const color = colors[Math.floor(Math.random() * colors.length)];
       const dims = new Cesium.Cartesian3(size, size * (0.6 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.6));
       const entity = viewer.entities.add({
@@ -540,15 +540,22 @@ function renderDebugLog() {
         spinSeed: Math.random() * 1000,
       });
     }
+    logDebug(`💥破片生成: ${count}個 / 中心=(${originLon.toFixed(6)}, ${originLat.toFixed(6)}, 高さ${originHeight.toFixed(1)}m) / サイズ基準=${baseSize.toFixed(2)}m`);
     return fragments;
   }
 
   function animateDebris(fragments, lifetimeMs) {
     const start = performance.now();
+    let firstTick = true;
     function tick() {
       const elapsed = performance.now() - start;
+      if (firstTick) {
+        logDebug(`💥破片アニメーション開始（${fragments.length}個、寿命${lifetimeMs}ms）`);
+        firstTick = false;
+      }
       if (elapsed >= lifetimeMs) {
         fragments.forEach((f) => viewer.entities.remove(f.entity));
+        logDebug(`💥破片アニメーション終了・削除しました`);
         return;
       }
       const t = elapsed / 1000; // 秒
@@ -557,14 +564,14 @@ function renderDebugLog() {
         const dz = f.vz * t - 0.5 * GRAVITY * t * t;
         const dist = Math.hypot(dx, dy);
         const loc = dist > 0.001 ? offsetLatLon(f.lat, f.lon, Math.atan2(dy, dx), dist) : { lat: f.lat, lon: f.lon };
+        // ★以前は「一定以上落ちたら消す」処理で早々に見えなくなっていた可能性があるため撤去。
+        // 　地面より下には行かないようクランプするだけにして、寿命が尽きるまでずっと見えるようにする。
         const h = Math.max(f.baseHeight, f.baseHeight + dz);
         const pos = Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, h);
         f.entity.position = pos;
         f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
           pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
         );
-        // 落ちきったら消す（地面に埋まって見えるのを防ぐ）
-        if (dz < -3) f.entity.show = false;
       });
       requestAnimationFrame(tick);
     }
@@ -641,7 +648,7 @@ function renderDebugLog() {
       const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
       const fragSize = Math.max(1.8, Math.min(7, scaleFactor / 4));
       const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
-      animateDebris(debris, 3200);
+      animateDebris(debris, 4200);
     });
     logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にし、体積の目安に応じた破片を飛び散らせました（半径${radiusM}m目安）`);
   }
@@ -802,7 +809,7 @@ function renderDebugLog() {
     // 隕石自身も、着弾で岩の破片となって飛び散る
     const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.9,
       ["#3d2b20", "#5a4030", "#ff9d3f"]);
-    animateDebris(meteorDebris, 2800);
+    animateDebris(meteorDebris, 4200);
 
     shakeCamera(350, 14);
     blastBuildingsAt(lon, lat, blastRadius);
