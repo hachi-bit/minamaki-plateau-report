@@ -517,14 +517,14 @@ function renderDebugLog() {
 
   // 破片（デブリ）を、飛び散る物理的な動き（初速＋重力）付きで生成する
   // ・隕石が砕ける時にも、建物が壊れる時にも、両方これを使い回す
-  const GRAVITY = 15; // 見栄え優先で、現実よりやや強めの重力にしている
+  const GRAVITY = 5; // ★かなりゆっくりにしたいので、重力も弱めた（以前は15）
   function spawnDebris(originLon, originLat, originHeight, count, baseSize, colors) {
     const fragments = [];
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 3 + Math.random() * 7;
-      const upSpeed = 4 + Math.random() * 8;
-      const size = baseSize * (0.4 + Math.random() * 0.8);
+      const speed = (1.5 + Math.random() * 3.5) * 0.5; // ★速度を半分以下に落として、ゆっくり飛び散るようにした
+      const upSpeed = (2 + Math.random() * 4) * 0.5;
+      const size = baseSize * (0.4 + Math.random() * 0.8) * 2; // ★サイズを2倍に
       const color = colors[Math.floor(Math.random() * colors.length)];
       const dims = new Cesium.Cartesian3(size, size * (0.6 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.6));
       const entity = viewer.entities.add({
@@ -641,16 +641,107 @@ function renderDebugLog() {
       const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
       const fragSize = Math.max(1.8, Math.min(7, scaleFactor / 4));
       const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
-      animateDebris(debris, 1600);
+      animateDebris(debris, 3200);
     });
     logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にし、体積の目安に応じた破片を飛び散らせました（半径${radiusM}m目安）`);
   }
 
   // 隕石の落下→着弾→崩壊、の一連の演出
+  // ★本物の多面体（いびつな岩）を作る。
+  // 　EntityAPIの箱・球だけでは「多面体」は作れないため、もう1段階低レベルな
+  // 　Geometry/Primitive APIを使い、正20面体の各頂点をランダムにズラして、
+  // 　ゴツゴツした岩のような形を生成している。
+  // 　フラットシェーディング（面ごとに頂点を複製して法線を計算）にすることで、
+  // 　各面がカクッとした「面」として見える、多面体らしい質感にしている。
+  function createRockGeometry(irregularity) {
+    const t = (1 + Math.sqrt(5)) / 2;
+    const rawVerts = [
+      [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+      [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+      [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    ];
+    const verts = rawVerts.map((v) => {
+      const len = Math.hypot(v[0], v[1], v[2]);
+      const jitter = 1 + (Math.random() - 0.5) * irregularity;
+      const s = jitter / len;
+      return [v[0] * s, v[1] * s, v[2] * s];
+    });
+    const faces = [
+      [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+      [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+      [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+      [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ];
+
+    const positions = [];
+    const normals = [];
+    const indices = [];
+    let idx = 0;
+    faces.forEach((f) => {
+      const a = verts[f[0]], b = verts[f[1]], c = verts[f[2]];
+      const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      let nx = ab[1] * ac[2] - ab[2] * ac[1];
+      let ny = ab[2] * ac[0] - ab[0] * ac[2];
+      let nz = ab[0] * ac[1] - ab[1] * ac[0];
+      const nlen = Math.hypot(nx, ny, nz) || 1;
+      nx /= nlen; ny /= nlen; nz /= nlen;
+      [a, b, c].forEach((v) => {
+        positions.push(v[0], v[1], v[2]);
+        normals.push(nx, ny, nz);
+      });
+      indices.push(idx, idx + 1, idx + 2);
+      idx += 3;
+    });
+
+    return new Cesium.Geometry({
+      attributes: new Cesium.GeometryAttributes({
+        position: new Cesium.GeometryAttribute({
+          componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+          componentsPerAttribute: 3,
+          values: new Float64Array(positions),
+        }),
+        normal: new Cesium.GeometryAttribute({
+          componentDatatype: Cesium.ComponentDatatype.FLOAT,
+          componentsPerAttribute: 3,
+          values: new Float32Array(normals),
+        }),
+      }),
+      indices: new Uint16Array(indices),
+      primitiveType: Cesium.PrimitiveType.TRIANGLES,
+      boundingSphere: Cesium.BoundingSphere.fromVertices(positions),
+    });
+  }
+
+  // 岩の多面体プリミティブを作る（ローカル原点中心・半径1のジオメトリを1回だけ作り、
+  // 　毎フレームは modelMatrix の再設定だけで移動・回転・拡大縮小させる、軽量な作り）
+  function createRockPrimitive(colorHex) {
+    const geometry = createRockGeometry(0.45);
+    const instance = new Cesium.GeometryInstance({
+      geometry,
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(colorHex)),
+      },
+    });
+    return viewer.scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: instance,
+      appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: false }),
+      asynchronous: false,
+    }));
+  }
+
+  // 岩の多面体プリミティブを、指定した位置・向き・大きさに配置し直す
+  function placeRockPrimitive(primitive, worldPos, scale, headingPitchRoll) {
+    const rotation = Cesium.Transforms.headingPitchRollQuaternion(worldPos, headingPitchRoll);
+    primitive.modelMatrix = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
+      worldPos, rotation, new Cesium.Cartesian3(scale, scale, scale)
+    );
+  }
+
   async function strikeMeteor(lat, lon) {
     const groundH = await groundHeightAt(lat, lon);
-    const durationMs = 1400;
-    const glowSize = meteorSize * 1.6; // ★以前は3.5倍で、岩本体を覆い隠すほど大きく主張しすぎて「透けて見える」原因になってた
+    const durationMs = 4500; // ★かなりゆっくり落ちるようにした（以前は1400ms）
+    const glowSize = meteorSize * 1.6;
     const blastRadius = meteorSize * METEOR_BLAST_MULTIPLIER;
 
     // ★垂直に落とすと単調なので、「画面の右上・少し手前」から斜めに降ってくる軌道にする。
@@ -664,28 +755,10 @@ function renderDebugLog() {
     startPos = Cesium.Cartesian3.add(startPos, Cesium.Cartesian3.multiplyByScalar(camUp, 150, new Cesium.Cartesian3()), new Cesium.Cartesian3());
     startPos = Cesium.Cartesian3.add(startPos, Cesium.Cartesian3.multiplyByScalar(camDir, -70, new Cesium.Cartesian3()), new Cesium.Cartesian3()); // 手前（カメラに近い）方向
 
-    // ★「ふわっと透明な球」ではなく、いびつな岩の塊が寄り集まった見た目にする
-    // 　（3〜4個の箱をランダムにずらして重ね、ゴツゴツした質感を出す。輪郭線も付けて固体感を強める）
-    const rockPieceCount = 4;
-    const rockPieces = [];
-    for (let i = 0; i < rockPieceCount; i++) {
-      const offset = {
-        x: (Math.random() - 0.5) * meteorSize * 0.7,
-        y: (Math.random() - 0.5) * meteorSize * 0.7,
-        z: (Math.random() - 0.5) * meteorSize * 0.7,
-      };
-      const pieceSize = meteorSize * (0.6 + Math.random() * 0.55);
-      const color = i % 2 === 0 ? "#3d2b20" : "#5a4030"; // 岩っぽい暗めの茶色
-      const entity = viewer.entities.add({
-        position: startPos,
-        box: {
-          dimensions: new Cesium.Cartesian3(pieceSize, pieceSize * 0.85, pieceSize * 1.1),
-          material: Cesium.Color.fromCssColorString(color),
-          outline: true, outlineColor: Cesium.Color.fromCssColorString("#ff9d3f").withAlpha(0.7), outlineWidth: 1,
-        },
-      });
-      rockPieces.push({ entity, offset, spinSeed: Math.random() * 1000 });
-    }
+    // ★本物の多面体（いびつな岩）のプリミティブを1個生成し、毎フレームは配置し直すだけにする
+    const rockPrimitive = createRockPrimitive("#4a3323");
+    placeRockPrimitive(rockPrimitive, startPos, meteorSize, new Cesium.HeadingPitchRoll(0, 0, 0));
+
     // 常に手前に光る、燃えるグロー（本体を覆い隠さない程度の控えめなサイズにしてある）
     const meteorGlow = viewer.entities.add({
       position: startPos,
@@ -695,6 +768,7 @@ function renderDebugLog() {
       },
     });
 
+    const spinSeed = Math.random() * 1000;
     const start = performance.now();
     await new Promise((resolve) => {
       function fall() {
@@ -705,21 +779,13 @@ function renderDebugLog() {
         // 開始地点→着弾地点を、直線的に補間する（＝斜めの軌道になる）
         const centerPos = Cesium.Cartesian3.lerp(startPos, impactPos, eased, new Cesium.Cartesian3());
         meteorGlow.position = centerPos;
-        // 岩の塊は、中心からのズレを保ったまま、少し回転もさせながら一緒に落ちる
-        const enu = Cesium.Transforms.eastNorthUpToFixedFrame(centerPos);
-        rockPieces.forEach((r) => {
-          const local = new Cesium.Cartesian3(r.offset.x, r.offset.y, r.offset.z);
-          const world = Cesium.Matrix4.multiplyByPoint(enu, local, new Cesium.Cartesian3());
-          r.entity.position = world;
-          r.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
-            world, new Cesium.HeadingPitchRoll(r.spinSeed + elapsed * 0.01, elapsed * 0.008, elapsed * 0.006)
-          );
-        });
+        placeRockPrimitive(rockPrimitive, centerPos, meteorSize,
+          new Cesium.HeadingPitchRoll(spinSeed + elapsed * 0.0018, elapsed * 0.0014, elapsed * 0.001));
         requestAnimationFrame(fall);
       }
       requestAnimationFrame(fall);
     });
-    rockPieces.forEach((r) => viewer.entities.remove(r.entity));
+    viewer.scene.primitives.remove(rockPrimitive);
     viewer.entities.remove(meteorGlow);
 
     // 着弾の瞬間の閃光（一瞬だけ光を出す）
@@ -736,7 +802,7 @@ function renderDebugLog() {
     // 隕石自身も、着弾で岩の破片となって飛び散る
     const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.9,
       ["#3d2b20", "#5a4030", "#ff9d3f"]);
-    animateDebris(meteorDebris, 1300);
+    animateDebris(meteorDebris, 2800);
 
     shakeCamera(350, 14);
     blastBuildingsAt(lon, lat, blastRadius);
