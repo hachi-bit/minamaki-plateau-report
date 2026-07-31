@@ -695,9 +695,10 @@ function renderDebugLog() {
      ・タイトル一覧から1件選ぶと、アコーディオンで内容が開く
      ・開いてる項目に対応する木には「光の柱」を立てて、場所を示す
      ============================================================ */
-  const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
+  const NEARBY_RADIUS_M = 12; // この範囲内の投稿を、まとめて一覧に出す（8m→1.5倍の12mに拡大）
   let listPanelOpen = false;
-  let selectionAuraEntity = null;
+  let selectionCylinderInner = null;
+  let selectionCylinderOuter = null;
   let searchRadiusAuraEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
@@ -713,27 +714,34 @@ function renderDebugLog() {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   }
 
-  // 選んだ投稿・一覧の範囲を示す表現は、どちらも「自分の投稿」を示すのに使ってた
-  // かすみがかったオーラ（auraSvg）の使い回し。あちらは無効化した代わりに、
-  // こちらでサイズ違いとして再利用する形にした。
-  // ★色は auraSvg 自体が金系の柔らかいグラデーションなので、そのまま踏襲している
-  //   （地面の円盤だと、建物や地形の起伏で埋もれる可能性があったため、
-  //    "浮かせて表示するビルボード" のこの表現に変更した）
+  // ★選択中の投稿と、一覧の検索範囲は、見た目をハッキリ区別できるよう別の表現にする
+  // （どちらも同じ「かすみ」にしてしまうと、何を示してるのか見分けがつかなくなったため）
+  // ・選択中の投稿：空色の、輪郭線なし2重円柱（内側は濃く狭く・外側は薄く広く、でふわっと感を出す）
+  const SELECTION_COLOR = "#38bdf8";
   function showSelectionGlow(loc, groundH) {
     clearSelectionGlow();
-    selectionAuraEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 6),
-      billboard: {
-        image: auraSvg(), width: 8, height: 8, sizeInMeters: true,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    const len = 30;
+    selectionCylinderOuter = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
+      cylinder: {
+        length: len, topRadius: 2.6, bottomRadius: 2.6,
+        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.12),
+      },
+    });
+    selectionCylinderInner = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
+      cylinder: {
+        length: len, topRadius: 1.1, bottomRadius: 1.1,
+        material: Cesium.Color.fromCssColorString(SELECTION_COLOR).withAlpha(0.28),
       },
     });
   }
   function clearSelectionGlow() {
-    if (selectionAuraEntity) { viewer.entities.remove(selectionAuraEntity); selectionAuraEntity = null; }
+    if (selectionCylinderInner) { viewer.entities.remove(selectionCylinderInner); selectionCylinderInner = null; }
+    if (selectionCylinderOuter) { viewer.entities.remove(selectionCylinderOuter); selectionCylinderOuter = null; }
   }
 
-  // 一覧に集めている範囲（NEARBY_RADIUS_M）も、同じオーラ表現を大きくして示す
+  // ・一覧の検索範囲：金系のかすみがかったオーラ（auraSvg）を、範囲サイズに応じて大きく表示
   function showSearchRadiusCircle(loc, groundH) {
     clearSearchRadiusCircle();
     searchRadiusAuraEntity = viewer.entities.add({
@@ -749,6 +757,7 @@ function renderDebugLog() {
   }
 
   function openListPanel(centerItem) {
+    clearSelectionGlow(); // ★前回選んでた投稿の光が、一覧が更新されても残ってしまうバグの修正
     showSearchRadiusCircle(centerItem.loc, centerItem.groundH);
 
     const nearby = plantedList
