@@ -99,6 +99,17 @@
     border:1px solid #4ade80; color:#4ade80; padding:8px 16px; border-radius:8px; font-size:12px; z-index:20; display:none; }
   #plantHint.show{ display:block; }
 
+  #meteorHint{ position:fixed; top:100px; left:50%; transform:translateX(-50%); background:rgba(255,107,53,0.15);
+    border:1px solid #ff6b35; color:#ff9f6b; padding:8px 16px; border-radius:8px; font-size:12px; z-index:20; display:none; }
+  #meteorHint.show{ display:block; }
+
+  #meteorPanel{ position:fixed; right:16px; bottom:250px; width:min(230px,78vw); background:var(--panel);
+    border:1px solid var(--border); border-radius:12px; padding:12px 14px; backdrop-filter:blur(6px);
+    z-index:20; display:none; }
+  #meteorPanel.show{ display:block; }
+  .meteorSliderLabel{ display:block; font-size:10.5px; color:var(--sub); margin:8px 0 3px; }
+  #meteorPanel input[type="range"]{ width:100%; }
+
   #camPanel{ position:fixed; right:16px; bottom:200px; width:min(260px,80vw); background:var(--panel);
     border:1px solid var(--border); border-radius:12px; padding:10px 12px; backdrop-filter:blur(6px);
     z-index:20; display:none; }
@@ -159,8 +170,21 @@
   <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
   <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
   <button class="iconBtn" id="buildingToggleBtn" title="建物の表示切り替え">🏢</button>
+  <button class="iconBtn" id="meteorToggleBtn" title="隕石を落とす">☄️</button>
   <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
   <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
+</div>
+
+<div id="meteorHint">☄️ 隕石を落とす場所をタップしてな</div>
+
+<div id="meteorPanel">
+  <div style="font-size:11px;color:var(--sub);margin-bottom:8px;">☄️ 隕石の設定</div>
+  <label class="meteorSliderLabel">爆発範囲 <span id="meteorRadiusVal"></span>m</label>
+  <input type="range" id="meteorRadiusSlider" min="5" max="60" value="20" />
+  <label class="meteorSliderLabel">隕石の大きさ <span id="meteorSizeVal"></span>m</label>
+  <input type="range" id="meteorSizeSlider" min="1" max="10" value="4" />
+  <label class="meteorSliderLabel">破片の数 <span id="meteorParticleVal"></span></label>
+  <input type="range" id="meteorParticleSlider" min="10" max="200" value="70" />
 </div>
 
 <div id="debugLogPanel">
@@ -446,6 +470,157 @@ function renderDebugLog() {
     e.currentTarget.classList.toggle("active", !buildingsVisible);
     logDebug(`建物の表示: ${buildingsVisible ? "ON" : "OFF"}`);
   });
+
+  /* ============================================================
+     ☄️ 隕石を落として、その場の建物を吹っ飛ばす（お遊び機能）
+     ・非表示にするだけで、元のPLATEAUデータやサーバー側は一切変更しない
+     ・ページを再読み込みすれば、すべて元通りに見える（新しくデータを取り直すから）
+     ============================================================ */
+  let meteorMode = false;
+  let meteorBlastRadius = 20;
+  let meteorSize = 4;
+  let meteorParticleCount = 70;
+
+  const meteorHint = document.getElementById("meteorHint");
+  const meteorPanel = document.getElementById("meteorPanel");
+  const meteorRadiusSlider = document.getElementById("meteorRadiusSlider");
+  const meteorSizeSlider = document.getElementById("meteorSizeSlider");
+  const meteorParticleSlider = document.getElementById("meteorParticleSlider");
+  const meteorRadiusVal = document.getElementById("meteorRadiusVal");
+  const meteorSizeVal = document.getElementById("meteorSizeVal");
+  const meteorParticleVal = document.getElementById("meteorParticleVal");
+
+  function refreshMeteorLabels() {
+    meteorRadiusVal.textContent = meteorBlastRadius;
+    meteorSizeVal.textContent = meteorSize;
+    meteorParticleVal.textContent = meteorParticleCount;
+  }
+  meteorRadiusSlider.addEventListener("input", (e) => { meteorBlastRadius = Number(e.target.value); refreshMeteorLabels(); });
+  meteorSizeSlider.addEventListener("input", (e) => { meteorSize = Number(e.target.value); refreshMeteorLabels(); });
+  meteorParticleSlider.addEventListener("input", (e) => { meteorParticleCount = Number(e.target.value); refreshMeteorLabels(); });
+  refreshMeteorLabels();
+
+  document.getElementById("meteorToggleBtn").addEventListener("click", (e) => {
+    meteorMode = !meteorMode;
+    e.currentTarget.classList.toggle("active", meteorMode);
+    meteorHint.classList.toggle("show", meteorMode);
+    meteorPanel.classList.toggle("show", meteorMode);
+    if (meteorMode) {
+      // 隕石モード中は、他の操作（投稿する場所を選ぶ等）とぶつからないよう一旦閉じておく
+      if (plantMode) exitPlantMode();
+      closeListPanel();
+    }
+  });
+
+  // 画面をわずかに揺らす（着弾の衝撃演出）
+  function shakeCamera(durationMs, magnitudePx) {
+    const start = performance.now();
+    function tick() {
+      const t = (performance.now() - start) / durationMs;
+      if (t >= 1) return;
+      const decay = 1 - t;
+      const dx = (Math.random() - 0.5) * magnitudePx * decay;
+      const dy = (Math.random() - 0.5) * magnitudePx * decay;
+      viewer.camera.lookRight(Cesium.Math.toRadians(dx * 0.02));
+      viewer.camera.lookUp(Cesium.Math.toRadians(dy * 0.02));
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // 着弾地点の周辺を、円状に何点かサンプリングして、そこにある建物をまとめて非表示にする
+  // （3D Tilesには「範囲内の建物を一括取得」というAPIが無いため、画面上の複数地点をピックして
+  // 　拾う、という力技で近似している。精度はそこそこ、という前提で使う）
+  function blastBuildingsAt(lon, lat, radiusM) {
+    const samplePoints = [{ lon, lat }];
+    const rings = 3;
+    for (let ring = 1; ring <= rings; ring++) {
+      const dist = (radiusM / rings) * ring;
+      const pointsInRing = 6 * ring;
+      for (let i = 0; i < pointsInRing; i++) {
+        const angle = (i / pointsInRing) * Math.PI * 2;
+        samplePoints.push(offsetLatLon(lat, lon, angle, dist));
+      }
+    }
+
+    let hiddenCount = 0;
+    const seen = new Set();
+    samplePoints.forEach((p) => {
+      const pos = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, REFERENCE_GROUND_HEIGHT + 5);
+      const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
+      if (!win) return;
+      const picks = viewer.scene.drillPick(win, 5);
+      picks.forEach((picked) => {
+        if (picked instanceof Cesium.Cesium3DTileFeature) {
+          const key = picked.getProperty("gml_id") || picked.getProperty("building_id") || JSON.stringify(picked);
+          if (seen.has(key)) return;
+          seen.add(key);
+          picked.show = false;
+          hiddenCount++;
+        }
+      });
+    });
+    logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にしました（半径${radiusM}m目安）`);
+  }
+
+  // 隕石の落下→着弾→爆発パーティクル、の一連の演出
+  async function strikeMeteor(lat, lon) {
+    const groundH = await groundHeightAt(lat, lon);
+    const startHeight = groundH + 400;
+    const durationMs = 900;
+
+    const meteorEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, startHeight),
+      ellipsoid: {
+        radii: new Cesium.Cartesian3(meteorSize, meteorSize, meteorSize),
+        material: Cesium.Color.fromCssColorString("#ff6b35").withAlpha(0.95),
+      },
+    });
+
+    const start = performance.now();
+    await new Promise((resolve) => {
+      function fall() {
+        const t = (performance.now() - start) / durationMs;
+        if (t >= 1) {
+          resolve();
+          return;
+        }
+        // 加速しながら落ちる（イーズイン）
+        const eased = t * t;
+        const h = startHeight - (startHeight - groundH) * eased;
+        meteorEntity.position = Cesium.Cartesian3.fromDegrees(lon, lat, h);
+        requestAnimationFrame(fall);
+      }
+      requestAnimationFrame(fall);
+    });
+    viewer.entities.remove(meteorEntity);
+
+    // 爆発パーティクル
+    const burstPos = Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 2);
+    const particleSystem = viewer.scene.primitives.add(new Cesium.ParticleSystem({
+      image: 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#ffb347"/></svg>'
+      ),
+      startColor: Cesium.Color.fromCssColorString("#ffcf6b").withAlpha(1.0),
+      endColor: Cesium.Color.fromCssColorString("#ff6b35").withAlpha(0.0),
+      startScale: 1.0,
+      endScale: 3.5,
+      minimumParticleLife: 0.5,
+      maximumParticleLife: 1.1,
+      minimumSpeed: 5.0,
+      maximumSpeed: 5.0 + meteorBlastRadius * 0.8,
+      imageSize: new Cesium.Cartesian2(20, 20),
+      emissionRate: 0, // burstで一気に出すので、通常放出は無し
+      lifetime: 1.2,
+      emitter: new Cesium.SphereEmitter(0.5),
+      modelMatrix: Cesium.Transforms.eastNorthUpToFixedFrame(burstPos),
+      bursts: [new Cesium.ParticleBurst({ time: 0.0, minimum: meteorParticleCount, maximum: meteorParticleCount })],
+    }));
+    setTimeout(() => viewer.scene.primitives.remove(particleSystem), 1500);
+
+    shakeCamera(350, 14);
+    blastBuildingsAt(lon, lat, meteorBlastRadius);
+  }
 
   function updateCamPanel() {
     if (!camPanelOpen) return;
@@ -946,6 +1121,12 @@ function renderDebugLog() {
   function enterPlantMode() {
     plantMode = true;
     closeListPanel();
+    if (meteorMode) {
+      meteorMode = false;
+      document.getElementById("meteorToggleBtn").classList.remove("active");
+      meteorHint.classList.remove("show");
+      meteorPanel.classList.remove("show");
+    }
     plantHint.classList.add("show");
     const pos = viewer.camera.positionCartographic;
     prePlantCamera = { lon: pos.longitude, lat: pos.latitude, height: pos.height, heading: viewer.camera.heading, pitch: viewer.camera.pitch };
@@ -979,8 +1160,22 @@ function renderDebugLog() {
     }
   }
 
-  // ここで唯一のLEFT_CLICKハンドラとして登録する（木の詳細表示／場所選択、両方をここで分岐する）
+  // ここで唯一のLEFT_CLICKハンドラとして登録する（木の詳細表示／場所選択／隕石、3つをここで分岐する）
   pickHandler.setInputAction((click) => {
+    if (meteorMode) {
+      const ray = viewer.camera.getPickRay(click.position);
+      if (!ray) return;
+      const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+      if (!cartesian) {
+        logDebug('⚠️地面の座標が取得できませんでした（空をタップした可能性）');
+        return;
+      }
+      const carto = Cesium.Cartographic.fromCartesian(cartesian);
+      const lat = Cesium.Math.toDegrees(carto.latitude), lon = Cesium.Math.toDegrees(carto.longitude);
+      logDebug(`☄️隕石発射: lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} 半径=${meteorBlastRadius}m`);
+      strikeMeteor(lat, lon);
+      return;
+    }
     if (!plantMode) {
       showInfoForTap(click);
       return;
