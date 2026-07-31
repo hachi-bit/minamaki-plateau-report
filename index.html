@@ -529,7 +529,10 @@ function renderDebugLog() {
       const dims = new Cesium.Cartesian3(size, size * (0.6 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.6));
       const entity = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight),
-        box: { dimensions: dims, material: Cesium.Color.fromCssColorString(color) },
+        box: {
+          dimensions: dims, material: Cesium.Color.fromCssColorString(color),
+          outline: true, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1,
+        },
       });
       fragments.push({
         entity, lon: originLon, lat: originLat, baseHeight: originHeight,
@@ -636,7 +639,7 @@ function renderDebugLog() {
       // 体積そのまま使うと数が飛躍しすぎるので、立方根でスケールを緩やかにする
       const scaleFactor = Math.cbrt(volumeApprox);
       const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
-      const fragSize = Math.max(0.8, Math.min(4.5, scaleFactor / 6));
+      const fragSize = Math.max(1.8, Math.min(7, scaleFactor / 4));
       const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
       animateDebris(debris, 1600);
     });
@@ -647,7 +650,7 @@ function renderDebugLog() {
   async function strikeMeteor(lat, lon) {
     const groundH = await groundHeightAt(lat, lon);
     const durationMs = 1400;
-    const glowSize = meteorSize * 3.5;
+    const glowSize = meteorSize * 1.6; // ★以前は3.5倍で、岩本体を覆い隠すほど大きく主張しすぎて「透けて見える」原因になってた
     const blastRadius = meteorSize * METEOR_BLAST_MULTIPLIER;
 
     // ★垂直に落とすと単調なので、「画面の右上・少し手前」から斜めに降ってくる軌道にする。
@@ -662,7 +665,7 @@ function renderDebugLog() {
     startPos = Cesium.Cartesian3.add(startPos, Cesium.Cartesian3.multiplyByScalar(camDir, -70, new Cesium.Cartesian3()), new Cesium.Cartesian3()); // 手前（カメラに近い）方向
 
     // ★「ふわっと透明な球」ではなく、いびつな岩の塊が寄り集まった見た目にする
-    // 　（3〜4個の箱をランダムにずらして重ね、ゴツゴツした質感を出す）
+    // 　（3〜4個の箱をランダムにずらして重ね、ゴツゴツした質感を出す。輪郭線も付けて固体感を強める）
     const rockPieceCount = 4;
     const rockPieces = [];
     for (let i = 0; i < rockPieceCount; i++) {
@@ -671,18 +674,19 @@ function renderDebugLog() {
         y: (Math.random() - 0.5) * meteorSize * 0.7,
         z: (Math.random() - 0.5) * meteorSize * 0.7,
       };
-      const pieceSize = meteorSize * (0.55 + Math.random() * 0.5);
+      const pieceSize = meteorSize * (0.6 + Math.random() * 0.55);
       const color = i % 2 === 0 ? "#3d2b20" : "#5a4030"; // 岩っぽい暗めの茶色
       const entity = viewer.entities.add({
         position: startPos,
         box: {
           dimensions: new Cesium.Cartesian3(pieceSize, pieceSize * 0.85, pieceSize * 1.1),
           material: Cesium.Color.fromCssColorString(color),
+          outline: true, outlineColor: Cesium.Color.fromCssColorString("#ff9d3f").withAlpha(0.7), outlineWidth: 1,
         },
       });
       rockPieces.push({ entity, offset, spinSeed: Math.random() * 1000 });
     }
-    // 常に手前に光る、燃えるグロー（実体が小さくても絶対に見失わないようにする）
+    // 常に手前に光る、燃えるグロー（本体を覆い隠さない程度の控えめなサイズにしてある）
     const meteorGlow = viewer.entities.add({
       position: startPos,
       billboard: {
@@ -730,7 +734,7 @@ function renderDebugLog() {
     setTimeout(() => viewer.entities.remove(flash), 300);
 
     // 隕石自身も、着弾で岩の破片となって飛び散る
-    const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.5,
+    const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.9,
       ["#3d2b20", "#5a4030", "#ff9d3f"]);
     animateDebris(meteorDebris, 1300);
 
