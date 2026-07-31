@@ -663,10 +663,12 @@ function renderDebugLog() {
       const volumeApprox = footprintAreaApprox * heightM;         // ㎥の目安（低くて広い建物も反映される）
 
       // 体積そのまま使うと数が飛躍しすぎるので、立方根でスケールを緩やかにする
+      // ★件数を増やすと、密集地で一気に重くなる（サンプリング点を増やしたことで拾える
+      // 　建物数も増えたため、影響が大きくなった）。1棟につき破片1個だけにして、
+      // 　その代わり「大きさ」で体積感を表現する。
       const scaleFactor = Math.cbrt(volumeApprox);
-      const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
-      const fragSize = Math.max(1.8, Math.min(7, scaleFactor / 4));
-      const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
+      const fragSize = Math.max(2.5, Math.min(14, scaleFactor / 1.6));
+      const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, 1, fragSize, buildingColors);
       animateDebris(debris, 6000);
     });
     logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にし、体積の目安に応じた破片を飛び散らせました（半径${radiusM}m目安）`);
@@ -833,8 +835,8 @@ function renderDebugLog() {
     });
     setTimeout(() => viewer.entities.remove(flash), 300);
 
-    // 隕石自身も、着弾で岩の破片となって飛び散る
-    const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.9,
+    // 隕石自身も、着弾で岩の破片となって飛び散る（数は少なめに抑えて、大きさで迫力を出す）
+    const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(6, Math.min(14, Math.round(meteorSize * 0.6))), meteorSize * 1.1,
       ["#3d2b20", "#5a4030", "#ff9d3f"]);
     animateDebris(meteorDebris, 6000);
 
