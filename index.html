@@ -215,7 +215,7 @@ const INITIAL_CAMERA = { lon: 139.525347, lat: 35.450514, height: 259.7, heading
 // 　LOD2はLOD1より整備エリアが狭いことが多く、このエリア（住宅地）に存在するかは
 // 　ここからは確認しきれなかったため、実際に試して確認する想定。
 // 　もし読み込みに失敗しても、コードはエラーを無視して黙ってスキップするだけなので安全。
-const USE_TEXTURED_LOD2 = true; // true にすると、下のLOD2テクスチャ付きURLを試せる
+const USE_TEXTURED_LOD2 = false; // true にすると、下のLOD2テクスチャ付きURLを試せる
 
 const BUILDING_URLS_LOD1 = [
   'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json', // 旭区
@@ -225,7 +225,6 @@ const BUILDING_URLS_LOD2_TEXTURE = [
   'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod2-texture-2024/tileset.json', // 旭区（存在するか未確認）
   'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod2-texture-2024/tileset.json', // 泉区（存在するか未確認）
 ];
-const BUILDING_URLS = USE_TEXTURED_LOD2 ? BUILDING_URLS_LOD2_TEXTURE : BUILDING_URLS_LOD1;
 
 const TYPE_COLORS = { positive: '#4ade80', negative: '#a9713f' };
 const TYPE_LABELS = { positive: 'プラスの意見（おすすめ）', negative: 'マイナスの意見（気になる点）' };
@@ -341,17 +340,56 @@ function renderDebugLog() {
   viewer.scene.globe.enableLighting = true;
   viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
-  const tilesets = [];
-  logDebug(`建物タイル読み込み開始（${USE_TEXTURED_LOD2 ? 'LOD2テクスチャ付き' : 'LOD1（テクスチャなし）'}）`);
-  for (const url of BUILDING_URLS) {
+  // ★LOD2は「読み込み自体は成功するが、対象エリアの建物データが実際には無い」ことがある。
+  // 　そこで、読み込んだタイルの範囲（bounding volume）が、みなまき周辺の座標を
+  // 　含んでいるかを確認し、含んでいなければLOD1に自動で切り替える。
+  // 　※範囲の判定に対応してないタイル形式の場合は、判定できないので「カバーしてる」扱いにして通す
+  //   （保守的に倒すことで、間違ってLOD2を消してしまわないようにする）
+  function tilesetCoversPoint(tileset, lon, lat) {
+    try {
+      const rect = tileset.root && tileset.root.boundingVolume && tileset.root.boundingVolume.rectangle;
+      if (!rect) return true;
+      const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+      return Cesium.Rectangle.contains(rect, carto);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  async function loadOneTileset(url) {
     try {
       const ts = await Cesium.Cesium3DTileset.fromUrl(url);
+      logDebug(`✅建物タイル読み込み成功: ${url}`);
+      return ts;
+    } catch (e) {
+      logDebug(`⚠️建物タイル読み込み失敗: ${url} / ${e.message}`);
+      return null;
+    }
+  }
+
+  // LOD2を試して、対象エリアをカバーしてなければLOD1にフォールバックする
+  async function loadBuildingWithFallback(lod2Url, lod1Url) {
+    if (!USE_TEXTURED_LOD2) {
+      return loadOneTileset(lod1Url);
+    }
+    const lod2 = await loadOneTileset(lod2Url);
+    if (lod2 && tilesetCoversPoint(lod2, INITIAL_CAMERA.lon, INITIAL_CAMERA.lat)) {
+      logDebug(`→ LOD2がみなまき周辺をカバーしているため、そのまま使用: ${lod2Url}`);
+      return lod2;
+    }
+    if (lod2) {
+      logDebug(`→ LOD2は読み込めたが、みなまき周辺をカバーしていないためLOD1に切り替え`);
+    }
+    return loadOneTileset(lod1Url);
+  }
+
+  const tilesets = [];
+  logDebug(`建物タイル読み込み開始（${USE_TEXTURED_LOD2 ? 'LOD2テクスチャ付き（対象エリア外ならLOD1へ自動切替）' : 'LOD1（テクスチャなし）'}）`);
+  for (let i = 0; i < BUILDING_URLS_LOD1.length; i++) {
+    const ts = await loadBuildingWithFallback(BUILDING_URLS_LOD2_TEXTURE[i], BUILDING_URLS_LOD1[i]);
+    if (ts) {
       viewer.scene.primitives.add(ts);
       tilesets.push(ts);
-      logDebug(`✅建物タイル読み込み成功: ${url}`);
-    } catch (e) {
-      console.warn('建物タイル読み込み失敗:', url, e.message);
-      logDebug(`⚠️建物タイル読み込み失敗（このURLは存在しないか非公開の可能性）: ${url} / ${e.message}`);
     }
   }
 
