@@ -37,8 +37,8 @@
   .stat b{ display:block; font-size:17px; line-height:1.1; color:var(--accent); }
   .stat small{ font-size:10px; color:var(--sub); }
 
-  #ticker{ position:fixed; left:0; top:0; transform:translate(-50%, -100%); display:none;
-    max-width:min(320px,80vw); white-space:nowrap; text-align:center; font-size:12.5px;
+  .floatingTitle{ position:fixed; left:0; top:0; transform:translate(-50%, -100%);
+    max-width:min(280px,74vw); white-space:nowrap; text-align:center; font-size:12.5px;
     background:var(--panel); border:1px solid var(--border); border-radius:999px;
     padding:7px 16px; backdrop-filter:blur(6px); z-index:14; pointer-events:none; }
 
@@ -134,7 +134,6 @@
   </div>
 </div>
 
-<div id="ticker"></div>
 <div id="plantHint">📍 気になった場所をタップしてな</div>
 
 <div id="listPanel">
@@ -585,80 +584,113 @@ function renderDebugLog() {
   }
 
   /* ============================================================
-     画面に映ってる木のタイトルを、1つずつ「その木から立ち上る」ように見せる
-     ・木の実際の画面上の位置を毎フレーム計算し、そこから上に浮かびながらフェードイン→フェードアウトする
-     ・同時に出すと重なるので、常に1件だけを順番に見せる
+     画面に映ってる木のタイトルを「その木から立ち上る」ように見せる
+     ・複数同時に出す（最大4件）。ただし画面上で近すぎる（重なりそうな）組み合わせは避ける
+     ・出すタイミングは少しランダムにずらして、機械的に揃った感じにならないようにする
+     ・最近表示したものは避けて選ぶことで、特定の木ばかり出る偏りを防ぐ
      ・一覧パネルが開いてる間は邪魔になるので止める
      ============================================================ */
-  function pickInViewCandidate() {
+  const MAX_CONCURRENT_TITLES = 4;
+  const MIN_SCREEN_GAP_PX = 100; // 同時に出す時、これより近い組み合わせは避ける
+  const TICKER_DURATION_MS = 3200; // 表示している時間（フェードイン〜フェードアウトの合計）
+  const TICKER_RISE_PX = 60;       // この間に、画面上でどれだけ上に浮かび上がるか
+  let activeFloatingTitles = []; // { el, loc, height, startTime, recordId, lastWinX, lastWinY }
+  const lastShownTime = new Map(); // recordId -> 最後に表示した時刻（偏り防止用）
+
+  // 画面内に映ってる木の一覧を、画面座標つきで返す
+  function pickInViewCandidates() {
     const canvas = viewer.scene.canvas;
     const w = canvas.clientWidth, h = canvas.clientHeight;
-    const cx = w / 2, cy = h / 2;
-    let best = null, bestDist = Infinity;
+    const results = [];
     plantedList.forEach((p) => {
       const pos = Cesium.Cartesian3.fromDegrees(p.loc.lon, p.loc.lat, p.canopyCenterY);
       const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
       if (!win || win.x < 0 || win.x > w || win.y < 0 || win.y > h) return; // 画面外は対象外
-      const d = Math.hypot(win.x - cx, win.y - cy); // 画面中央に近いものを優先する
-      if (d < bestDist) { bestDist = d; best = p; }
+      results.push({ p, win });
     });
-    return best;
+    return results;
   }
 
-  const TICKER_DURATION_MS = 3200; // 表示している時間（フェードイン〜フェードアウトの合計）
-  const TICKER_RISE_PX = 60;       // この間に、画面上でどれだけ上に浮かび上がるか
-  let floatingTitle = null; // { el, loc, height, startTime }
+  // 次に出す1件を選ぶ：①既に表示中と被らない ②表示中のものと画面上で近すぎない
+  // ③その中で「一番最近出してない」ものを優先（偏りをなくす）
+  function chooseNextCandidate() {
+    const candidates = pickInViewCandidates();
+    if (candidates.length === 0) return null;
+
+    const activeIds = new Set(activeFloatingTitles.map((t) => t.recordId));
+    let pool = candidates.filter((c) => !activeIds.has(c.p.r.id));
+
+    pool = pool.filter((c) => {
+      return !activeFloatingTitles.some((t) => {
+        const dx = c.win.x - t.lastWinX, dy = c.win.y - t.lastWinY;
+        return Math.hypot(dx, dy) < MIN_SCREEN_GAP_PX;
+      });
+    });
+
+    if (pool.length === 0) return null;
+
+    pool.sort((a, b) => (lastShownTime.get(a.p.r.id) || 0) - (lastShownTime.get(b.p.r.id) || 0));
+    return pool[0].p;
+  }
 
   function showTitleFromTree(p) {
-    const el = document.getElementById("ticker");
+    const el = document.createElement("div");
+    el.className = "floatingTitle";
     const icon = p.r.type === "positive" ? "🌳" : "🌲";
     el.textContent = `${icon} ${p.r.title}`;
-    el.style.display = "block";
-    floatingTitle = {
-      el,
-      loc: p.loc,
+    document.body.appendChild(el);
+
+    lastShownTime.set(p.r.id, performance.now());
+    activeFloatingTitles.push({
+      el, loc: p.loc,
       height: p.canopyCenterY + 1.1, // 木のてっぺん付近から立ち上らせる
-      startTime: performance.now(),
-    };
+      startTime: performance.now(), recordId: p.r.id,
+      lastWinX: -9999, lastWinY: -9999,
+    });
   }
 
-  // 毎フレーム、木の位置（カメラが動けば画面上の位置も変わる）を再計算しつつ、
-  // 経過時間に応じて「上に浮かぶ量」と「不透明度（フェードイン→保持→フェードアウト）」を更新する
-  function updateFloatingTitle() {
-    if (!floatingTitle) return;
-    const elapsed = performance.now() - floatingTitle.startTime;
-    const t = elapsed / TICKER_DURATION_MS;
-    if (t >= 1) {
-      floatingTitle.el.style.display = "none";
-      floatingTitle = null;
-      return;
-    }
+  // 毎フレーム、表示中の全件について、木の位置（カメラが動けば画面上の位置も変わる）を
+  // 再計算しつつ、経過時間に応じて「上に浮かぶ量」と「不透明度」を更新する
+  function updateFloatingTitles() {
+    if (activeFloatingTitles.length === 0) return;
+    const now = performance.now();
 
-    const pos = Cesium.Cartesian3.fromDegrees(floatingTitle.loc.lon, floatingTitle.loc.lat, floatingTitle.height);
-    const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
-    if (!win) { floatingTitle.el.style.display = "none"; return; }
+    activeFloatingTitles = activeFloatingTitles.filter((ft) => {
+      const t = (now - ft.startTime) / TICKER_DURATION_MS;
+      if (t >= 1) { ft.el.remove(); return false; }
 
-    // フェードイン（最初の15%）→保持→フェードアウト（最後の30%）
-    let opacity;
-    if (t < 0.15) opacity = t / 0.15;
-    else if (t > 0.7) opacity = Math.max(0, (1 - t) / 0.3);
-    else opacity = 1;
+      const pos = Cesium.Cartesian3.fromDegrees(ft.loc.lon, ft.loc.lat, ft.height);
+      const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
+      if (!win) { ft.el.style.display = "none"; return true; }
 
-    const rise = TICKER_RISE_PX * t; // 時間とともに、じわじわ上へ
+      ft.lastWinX = win.x;
+      ft.lastWinY = win.y;
 
-    floatingTitle.el.style.display = "block";
-    floatingTitle.el.style.left = win.x + "px";
-    floatingTitle.el.style.top = (win.y - rise) + "px";
-    floatingTitle.el.style.opacity = opacity;
+      // フェードイン（最初の15%）→保持→フェードアウト（最後の30%）
+      let opacity;
+      if (t < 0.15) opacity = t / 0.15;
+      else if (t > 0.7) opacity = Math.max(0, (1 - t) / 0.3);
+      else opacity = 1;
+
+      const rise = TICKER_RISE_PX * t; // 時間とともに、じわじわ上へ
+
+      ft.el.style.display = "block";
+      ft.el.style.left = win.x + "px";
+      ft.el.style.top = (win.y - rise) + "px";
+      ft.el.style.opacity = opacity;
+      return true;
+    });
   }
-  viewer.scene.preRender.addEventListener(updateFloatingTitle);
+  viewer.scene.preRender.addEventListener(updateFloatingTitles);
 
   function ambientTickerLoop() {
-    if (!listPanelOpen) {
-      const candidate = pickInViewCandidate();
+    if (!listPanelOpen && activeFloatingTitles.length < MAX_CONCURRENT_TITLES) {
+      const candidate = chooseNextCandidate();
       if (candidate) showTitleFromTree(candidate);
     }
-    setTimeout(ambientTickerLoop, 4500); // 次の1件まで、読める間隔をあける
+    // 0.9〜1.8秒のランダムな間隔にして、複数出る時も機械的に揃った感じにならないようにする
+    const nextDelay = 900 + Math.random() * 900;
+    setTimeout(ambientTickerLoop, nextDelay);
   }
   function startAmbientTicker() {
     ambientTickerLoop();
