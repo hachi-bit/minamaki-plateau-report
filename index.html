@@ -38,9 +38,10 @@
   .stat small{ font-size:10px; color:var(--sub); }
 
   .floatingTitle{ position:fixed; left:0; top:0; transform:translate(-50%, -100%);
-    max-width:min(280px,74vw); white-space:nowrap; text-align:center; font-size:12.5px;
-    background:var(--panel); border:1px solid var(--border); border-radius:999px;
-    padding:7px 16px; backdrop-filter:blur(6px); z-index:14; pointer-events:none; }
+    min-width:64px; min-height:18px; box-sizing:border-box;
+    max-width:min(260px,72vw); white-space:normal; text-align:center; font-size:12.5px; font-weight:700;
+    background:#fffdf5; color:#3a2f1a; border:2px solid; border-radius:18px;
+    padding:9px 18px; box-shadow:0 4px 12px rgba(0,0,0,0.28); z-index:14; pointer-events:none; }
 
   #listPanel{ position:fixed; left:0; right:0; bottom:0; max-height:56vh; background:var(--panel);
     border-top:1px solid var(--border); border-radius:18px 18px 0 0; backdrop-filter:blur(10px);
@@ -565,7 +566,7 @@ function renderDebugLog() {
         plantEntities.set(ring.id, r);
         plantEntities.set(aura.id, r);
       }
-      plantedList.push({ r, loc, canopyCenterY, groundH });
+      plantedList.push({ r, loc, canopyCenterY, groundH, canopyR });
       logDebug(`木を生やした: id=${r.id} title=${r.title} type=${r.type}`);
     } catch (e) {
       logDebug(`⚠️木の生成に失敗: id=${r.id} エラー=${e && e.message}`);
@@ -590,10 +591,10 @@ function renderDebugLog() {
      ・最近表示したものは避けて選ぶことで、特定の木ばかり出る偏りを防ぐ
      ・一覧パネルが開いてる間は邪魔になるので止める
      ============================================================ */
-  const MAX_CONCURRENT_TITLES = 4;
+  const MAX_CONCURRENT_TITLES = 9;  // 密集してる場所ほど賑やかに見えるよう、上限を増やした
   const MIN_SCREEN_GAP_PX = 100; // 同時に出す時、これより近い組み合わせは避ける
-  const TICKER_DURATION_MS = 3200; // 表示している時間（フェードイン〜フェードアウトの合計）
-  const TICKER_RISE_PX = 60;       // この間に、画面上でどれだけ上に浮かび上がるか
+  const TICKER_DURATION_MS = 11000; // 表示している時間（フェードイン〜フェードアウトの合計）。ゆっくり漂うように長めにした
+  const TICKER_RISE_PX = 180;       // この間に、画面上でどれだけ上に浮かび上がるか（以前の約3倍）
   let activeFloatingTitles = []; // { el, loc, height, startTime, recordId, lastWinX, lastWinY }
   const lastShownTime = new Map(); // recordId -> 最後に表示した時刻（偏り防止用）
 
@@ -636,6 +637,7 @@ function renderDebugLog() {
   function showTitleFromTree(p) {
     const el = document.createElement("div");
     el.className = "floatingTitle";
+    el.style.borderColor = colorForType(p.r.type);
     const icon = p.r.type === "positive" ? "🌳" : "🌲";
     el.textContent = `${icon} ${p.r.title}`;
     document.body.appendChild(el);
@@ -688,8 +690,8 @@ function renderDebugLog() {
       const candidate = chooseNextCandidate();
       if (candidate) showTitleFromTree(candidate);
     }
-    // 0.9〜1.8秒のランダムな間隔にして、複数出る時も機械的に揃った感じにならないようにする
-    const nextDelay = 900 + Math.random() * 900;
+    // 密集してる場所ほど枠が埋まりやすいよう間隔を詰めつつ、機械的に揃った感じにならないようランダム性は残す
+    const nextDelay = 600 + Math.random() * 700;
     setTimeout(ambientTickerLoop, nextDelay);
   }
   function startAmbientTicker() {
@@ -705,7 +707,8 @@ function renderDebugLog() {
      ============================================================ */
   const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
   let listPanelOpen = false;
-  let selectionPillarEntity = null;
+  let selectionRingEntity = null;
+  let selectionAuraEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -720,22 +723,30 @@ function renderDebugLog() {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   }
 
-  // 選んだ木に「光の柱」を立てる（既にあれば消してから立て直す）
-  function showSelectionPillar(loc, groundH, colorHex) {
-    clearSelectionPillar();
-    selectionPillarEntity = viewer.entities.add({
-      polyline: {
-        positions: [
-          Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
-          Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 60),
-        ],
-        width: 6,
-        material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.4, color: Cesium.Color.fromCssColorString(colorHex) }),
+  // 選んだ木を、「自分の投稿」を示す時と同じ、ふわっと透けるオーラでやんわり示す
+  // （光の柱だと主張が強すぎたため、既存の myring_/myaura_ と同じ見た目に統一した）
+  function showSelectionGlow(loc, groundH, canopyCenterY, canopyR) {
+    clearSelectionGlow();
+    selectionRingEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
+      ellipse: {
+        semiMinorAxis: canopyR * 1.3, semiMajorAxis: canopyR * 1.3,
+        material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.3),
+        outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166"), outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+    selectionAuraEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
+      billboard: {
+        image: auraSvg(), width: canopyR * 2.4, height: canopyR * 2.4, sizeInMeters: true,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
   }
-  function clearSelectionPillar() {
-    if (selectionPillarEntity) { viewer.entities.remove(selectionPillarEntity); selectionPillarEntity = null; }
+  function clearSelectionGlow() {
+    if (selectionRingEntity) { viewer.entities.remove(selectionRingEntity); selectionRingEntity = null; }
+    if (selectionAuraEntity) { viewer.entities.remove(selectionAuraEntity); selectionAuraEntity = null; }
   }
 
   function openListPanel(centerItem) {
@@ -765,10 +776,10 @@ function renderDebugLog() {
         const wasOpen = row.classList.contains("open");
         body.querySelectorAll(".listItem.open").forEach((el) => el.classList.remove("open"));
         if (wasOpen) {
-          clearSelectionPillar();
+          clearSelectionGlow();
         } else {
           row.classList.add("open");
-          showSelectionPillar(item.loc, item.groundH, colorForType(item.r.type));
+          showSelectionGlow(item.loc, item.groundH, item.canopyCenterY, item.canopyR);
         }
       });
       body.appendChild(row);
@@ -781,7 +792,7 @@ function renderDebugLog() {
   function closeListPanel() {
     document.getElementById("listPanel").classList.remove("show");
     listPanelOpen = false;
-    clearSelectionPillar();
+    clearSelectionGlow();
   }
   document.getElementById("listPanelCloseBtn").addEventListener("click", closeListPanel);
 
