@@ -528,6 +528,9 @@ function renderDebugLog() {
       const color = colors[Math.floor(Math.random() * colors.length)];
       const dims = new Cesium.Cartesian3(size, size * (0.7 + Math.random() * 0.5), size * (0.7 + Math.random() * 0.5));
       const startPos = Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight);
+      // ★グローを外して、木とまったく同じ「純粋な立体だけ」の構成にした。
+      // 　壊した建物自体はもう非表示になっている（＝そこに遮るものは無い）ので、
+      // 　真上に飛べば、木が空き地に立ってるのと同じ状況になるはず、という検証。
       const entity = viewer.entities.add({
         position: startPos,
         box: {
@@ -535,19 +538,8 @@ function renderDebugLog() {
           outline: true, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1,
         },
       });
-      // ★隕石と同じ理由：本物の立体（box）だけだと建物に隠れて見えなくなることがある。
-      // 　隕石で効果があった「常に手前に描画される小さいグロー」を、破片1個1個にも
-      // 　同じように付け、見た目のリアルさ（立体）と確実な視認性、両方を確保する。
-      const glowSize = size * 1.4;
-      const glow = viewer.entities.add({
-        position: startPos,
-        billboard: {
-          image: auraSvg(), width: glowSize, height: glowSize, sizeInMeters: true,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-      });
       fragments.push({
-        entity, glow, lon: originLon, lat: originLat, baseHeight: originHeight,
+        entity, lon: originLon, lat: originLat, baseHeight: originHeight,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, vz: upSpeed,
         spinSeed: Math.random() * 1000,
       });
@@ -566,10 +558,7 @@ function renderDebugLog() {
         firstTick = false;
       }
       if (elapsed >= lifetimeMs) {
-        fragments.forEach((f) => {
-          viewer.entities.remove(f.entity);
-          if (f.glow) viewer.entities.remove(f.glow);
-        });
+        fragments.forEach((f) => viewer.entities.remove(f.entity));
         logDebug(`💥破片アニメーション終了・削除しました`);
         return;
       }
@@ -587,7 +576,6 @@ function renderDebugLog() {
         f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
           pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
         );
-        if (f.glow) f.glow.position = pos;
       });
       requestAnimationFrame(tick);
     }
