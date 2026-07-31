@@ -37,11 +37,32 @@
   .stat b{ display:block; font-size:17px; line-height:1.1; color:var(--accent); }
   .stat small{ font-size:10px; color:var(--sub); }
 
-  #ticker{ position:fixed; top:60px; left:50%; transform:translateX(-50%); max-width:min(520px,86vw);
-    text-align:center; font-size:12px; background:var(--panel); border:1px solid var(--border);
-    border-radius:999px; padding:7px 16px; backdrop-filter:blur(6px); opacity:0; transition:opacity .8s;
-    z-index:10; pointer-events:none; }
-  #ticker.show{ opacity:1; }
+  #ticker{ position:fixed; bottom:158px; left:50%; transform:translateX(-50%) translateY(16px);
+    max-width:min(520px,86vw); text-align:center; font-size:12.5px; background:var(--panel);
+    border:1px solid var(--border); border-radius:999px; padding:8px 18px; backdrop-filter:blur(6px);
+    opacity:0; transition:opacity 1.1s ease, transform 1.1s ease;
+    z-index:14; pointer-events:none; }
+  #ticker.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  #listPanel{ position:fixed; left:0; right:0; bottom:0; max-height:56vh; background:var(--panel);
+    border-top:1px solid var(--border); border-radius:18px 18px 0 0; backdrop-filter:blur(10px);
+    transform:translateY(100%); transition:transform .3s ease; z-index:28; display:flex; flex-direction:column; }
+  #listPanel.show{ transform:translateY(0); }
+  #listPanelHeader{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px;
+    border-bottom:1px solid var(--border); font-size:13px; font-weight:600; flex:none; }
+  #listPanelHeader button{ background:rgba(255,255,255,0.08); border:1px solid var(--border); color:#eaf2ff;
+    border-radius:8px; padding:5px 12px; font-size:11.5px; cursor:pointer; }
+  #listPanelBody{ overflow-y:auto; padding:4px 16px 20px; }
+  .listItem{ border-bottom:1px solid var(--border); }
+  .listItem .listItemTitleRow{ display:flex; align-items:center; gap:9px; padding:12px 2px; cursor:pointer; }
+  .listItem .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .listItem .titleText{ flex:1; font-size:13px; font-weight:600; }
+  .listItem .arrow{ color:var(--sub); font-size:11px; transition:transform .2s ease; }
+  .listItem.open .arrow{ transform:rotate(90deg); }
+  .listItem .listItemBody{ max-height:0; overflow:hidden; transition:max-height .25s ease; font-size:12px;
+    color:var(--sub); line-height:1.6; padding:0 2px; }
+  .listItem.open .listItemBody{ max-height:240px; padding-bottom:12px; }
+  .listItem .listItemBody .mine{ color:var(--accent); font-weight:700; margin-top:6px; }
 
   #legend{ position:fixed; left:16px; bottom:150px; display:none; flex-direction:column; gap:6px;
     background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:10px 12px;
@@ -118,6 +139,14 @@
 <div id="ticker"></div>
 <div id="plantHint">📍 気になった場所をタップしてな</div>
 
+<div id="listPanel">
+  <div id="listPanelHeader">
+    <span id="listPanelTitle">この辺りの投稿</span>
+    <button id="listPanelCloseBtn">閉じる</button>
+  </div>
+  <div id="listPanelBody"></div>
+</div>
+
 <div id="legend">
   <div class="cap">👆 木をタップすると詳細が見れるで</div>
   <div class="cap">木の色・形（種類）</div>
@@ -132,7 +161,6 @@
   <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
   <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
   <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
-  <button class="iconBtn" id="paperToggleBtn" title="紙の表示切り替え（デバッグ用：風船だけ確認できる）">📄</button>
   <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
 </div>
 
@@ -365,19 +393,6 @@ function renderDebugLog() {
     });
   });
 
-  /* ============================================================
-     📄 紙の表示切り替え（デバッグ用：風船だけを確認したい時に使う）
-     ============================================================ */
-  let showPaper = true;
-  document.getElementById("paperToggleBtn").addEventListener("click", (e) => {
-    showPaper = !showPaper;
-    e.currentTarget.classList.toggle("active", !showPaper);
-    activeBubbles.forEach((b) => {
-      if (b.paperEntity) b.paperEntity.show = showPaper;
-      if (b.tieEntity) b.tieEntity.show = showPaper;
-    });
-    logDebug(`紙の表示: ${showPaper ? "ON（通常）" : "OFF（風船だけ確認モード）"}`);
-  });
 
   /* ============================================================
      ゆっくり見渡す
@@ -553,7 +568,7 @@ function renderDebugLog() {
         plantEntities.set(ring.id, r);
         plantEntities.set(aura.id, r);
       }
-      plantedList.push({ r, loc, canopyCenterY });
+      plantedList.push({ r, loc, canopyCenterY, groundH });
       logDebug(`木を生やした: id=${r.id} title=${r.title} type=${r.type}`);
     } catch (e) {
       logDebug(`⚠️木の生成に失敗: id=${r.id} エラー=${e && e.message}`);
@@ -568,34 +583,60 @@ function renderDebugLog() {
     document.getElementById("statPositive").textContent = data.responses.filter((r) => r.type === "positive").length;
     document.getElementById("statNegative").textContent = data.responses.filter((r) => r.type === "negative").length;
 
-    const tickerTexts = data.responses
-      .filter((r) => r.title)
-      .map((r) => `${r.type === "positive" ? "🌱" : "🍂"} ${r.title}`);
-    startTicker(tickerTexts);
-  }
-
-  let tickerTimer = null;
-  function startTicker(texts) {
-    const el = document.getElementById("ticker");
-    if (tickerTimer) clearInterval(tickerTimer);
-    if (!texts.length) { el.classList.remove("show"); return; }
-    let i = 0;
-    const show = () => { el.innerHTML = `“ ${texts[i % texts.length]} ”`; el.classList.add("show"); i++; };
-    show();
-    tickerTimer = setInterval(show, 5500);
+    startAmbientTicker();
   }
 
   /* ============================================================
-     木をタップして、近くの投稿もまとめて「風船」で見る
-     ・風船＝Canvasに文字を描いた1枚の板（ビルボード）。中に文章ごと物理演算で揺れる
-     ・複数の風船が重なっても、位置を無理に押し合って避けさせることはしない
-       （文章ごと動かす都合上、重なり回避と物理演算を両立させるのが難しいため、
-        8-bitさんと相談のうえ「重なる可能性は許容する」方針にした）
+     画面に映ってる木のタイトルを、1つずつゆっくり見せるアンビエント表示
+     ・同時に出すと重なるので、常に1件だけを順番に見せる
+     ・一覧パネルが開いてる間は邪魔になるので止める
      ============================================================ */
-  const NEARBY_RADIUS_M = 6;   // この範囲内の投稿もまとめて風船を出す
-  const MAX_BUBBLES = 6;       // 一度に出す風船の上限
-  let activeBubbles = [];      // { recordId, loc, canopyCenterY, balloonEntity, stringEntity, swayAngle, swayVel }
-  let bubbleHideTimer = null;
+  function pickInViewCandidate() {
+    const canvas = viewer.scene.canvas;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const cx = w / 2, cy = h / 2;
+    let best = null, bestDist = Infinity;
+    plantedList.forEach((p) => {
+      const pos = Cesium.Cartesian3.fromDegrees(p.loc.lon, p.loc.lat, p.canopyCenterY);
+      const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
+      if (!win || win.x < 0 || win.x > w || win.y < 0 || win.y > h) return; // 画面外は対象外
+      const d = Math.hypot(win.x - cx, win.y - cy); // 画面中央に近いものを優先する
+      if (d < bestDist) { bestDist = d; best = p; }
+    });
+    return best;
+  }
+
+  function showTitleTicker(p) {
+    const el = document.getElementById("ticker");
+    const icon = p.r.type === "positive" ? "🌳" : "🌲";
+    el.textContent = `${icon} ${p.r.title}`;
+    el.classList.add("show");
+    clearTimeout(tickerHideTimer);
+    tickerHideTimer = setTimeout(() => el.classList.remove("show"), 3200);
+  }
+
+  let tickerHideTimer = null;
+  function ambientTickerLoop() {
+    if (!listPanelOpen) {
+      const candidate = pickInViewCandidate();
+      if (candidate) showTitleTicker(candidate);
+    }
+    setTimeout(ambientTickerLoop, 4500); // 次の1件まで、読める間隔をあける
+  }
+  function startAmbientTicker() {
+    ambientTickerLoop();
+  }
+
+
+  /* ============================================================
+     木をタップして、近くの投稿を一覧パネルで見る
+     ・件数に上限を設けず、パネル内はスクロールで対応する
+     ・タイトル一覧から1件選ぶと、アコーディオンで内容が開く
+     ・開いてる項目に対応する木には「光の柱」を立てて、場所を示す
+     ============================================================ */
+  const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
+  let listPanelOpen = false;
+  let selectionPillarEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -606,175 +647,74 @@ function renderDebugLog() {
     return Math.sqrt(dLat * dLat + dLon * dLon);
   }
 
-  function clearBubbles() {
-    activeBubbles.forEach((b) => {
-      if (b.balloonEntity) viewer.entities.remove(b.balloonEntity);
-      if (b.paperEntity) viewer.entities.remove(b.paperEntity);
-      if (b.stringEntity) viewer.entities.remove(b.stringEntity);
-      if (b.tieEntity) viewer.entities.remove(b.tieEntity);
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  // 選んだ木に「光の柱」を立てる（既にあれば消してから立て直す）
+  function showSelectionPillar(loc, groundH, colorHex) {
+    clearSelectionPillar();
+    selectionPillarEntity = viewer.entities.add({
+      polyline: {
+        positions: [
+          Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
+          Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 60),
+        ],
+        width: 6,
+        material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.4, color: Cesium.Color.fromCssColorString(colorHex) }),
+      },
     });
-    activeBubbles = [];
+  }
+  function clearSelectionPillar() {
+    if (selectionPillarEntity) { viewer.entities.remove(selectionPillarEntity); selectionPillarEntity = null; }
   }
 
-  // ===== 風船の物理演算（バネ＋減衰付きの振り子） =====
-  const BALLOON_STRING_LEN = 1.6; // 木から風船までの紐の長さ（メートル）
-  const BALLOON_RADIUS_M = 0.75;  // 風船（本物の3D球体）の半径
-  const BALLOON_SPRING_K = 20;    // 元の位置に戻ろうとする力の強さ
-  const BALLOON_DAMPING = 3.0;    // 揺れが収まる速さ（大きいほど早く止まる）
-  const PAPER_WIDTH_M = 2.3;      // 紙（コメントを書いた板）の実寸の幅（メートル）
-  const BALLOON_CANVAS_W = 420;   // Canvas解像度（文字の解像度に影響。実寸とは別）
-  const BALLOON_CANVAS_H = 300;
-  let lastPhysicsTime = null;
+  function openListPanel(centerItem) {
+    const nearby = plantedList
+      .map((p) => ({ p, dist: metersBetween(p.loc, centerItem.loc) }))
+      .filter((x) => x.dist <= NEARBY_RADIUS_M)
+      .sort((a, b) => a.dist - b.dist)
+      .map((x) => x.p);
 
-  // 風船を「つつく」：揺れの勢い（角速度）を追加する
-  function pokeBalloon(b, strength) {
-    b.swayVel += strength;
-  }
+    document.getElementById("listPanelTitle").textContent = `この辺りの投稿（${nearby.length}件）`;
+    const body = document.getElementById("listPanelBody");
+    body.innerHTML = "";
 
-  // 風船（球体）・紐・紙（Canvas板）の3D位置を、振り子の角度から計算して更新する
-  function updateBalloon3D(b, dtSec) {
-    b.swayVel += (-BALLOON_SPRING_K * b.swayAngle - BALLOON_DAMPING * b.swayVel) * dtSec;
-    b.swayAngle += b.swayVel * dtSec;
-
-    const attachHeight = b.canopyCenterY + 1.1; // 紐の付け根＝木のてっぺん付近
-    const attachPos = Cesium.Cartesian3.fromDegrees(b.loc.lon, b.loc.lat, attachHeight);
-
-    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(attachPos);
-    const east = Cesium.Matrix4.getColumn(enu, 0, new Cesium.Cartesian3());
-    const up = Cesium.Matrix4.getColumn(enu, 2, new Cesium.Cartesian3());
-
-    // 振り子の位置計算：付け根から「東方向にsinθ、上方向にcosθ」だけ紐の長さぶん離れた点が風船の中心
-    const horiz = Cesium.Cartesian3.multiplyByScalar(east, BALLOON_STRING_LEN * Math.sin(b.swayAngle), new Cesium.Cartesian3());
-    const vert = Cesium.Cartesian3.multiplyByScalar(up, BALLOON_STRING_LEN * Math.cos(b.swayAngle), new Cesium.Cartesian3());
-
-    let balloonPos = Cesium.Cartesian3.add(attachPos, horiz, new Cesium.Cartesian3());
-    balloonPos = Cesium.Cartesian3.add(balloonPos, vert, new Cesium.Cartesian3());
-
-    // 紙（コメントを書いた板）は、風船のすぐ下に「結び付けられてる」位置に配置する
-    // （風船と同じ揺れに完全に追従するので、別の物理演算は不要）
-    // 紙は風船からしっかり離す（近すぎると、常に手前描画される紙が風船を覆い隠してしまうため）
-    const paperDrop = Cesium.Cartesian3.multiplyByScalar(up, -(BALLOON_RADIUS_M + 0.6), new Cesium.Cartesian3());
-    const paperPos = Cesium.Cartesian3.add(balloonPos, paperDrop, new Cesium.Cartesian3());
-
-    b.balloonEntity.position = balloonPos;
-    b.paperEntity.position = paperPos;
-    b.stringEntity.polyline.positions = [attachPos, balloonPos];
-    b.tieEntity.polyline.positions = [balloonPos, paperPos];
-  }
-
-  // 毎フレーム呼ばれる：全ての風船の物理演算を進める
-  function updateBubblePositions() {
-    if (activeBubbles.length === 0) { lastPhysicsTime = null; return; }
-    const now = performance.now();
-    const dtSec = lastPhysicsTime === null ? 0 : Math.min((now - lastPhysicsTime) / 1000, 0.1);
-    lastPhysicsTime = now;
-    activeBubbles.forEach((b) => updateBalloon3D(b, dtSec));
-  }
-  viewer.scene.preRender.addEventListener(updateBubblePositions);
-
-  // Canvasに、日本語対応の折り返し付きでテキストを描く（1文字ずつ幅を測りながら改行位置を決める）
-  function wrapJapaneseText(ctx, text, maxWidth, maxLines) {
-    const lines = [];
-    let line = "";
-    for (const ch of text) {
-      const test = line + ch;
-      if (ctx.measureText(test).width > maxWidth && line !== "") {
-        lines.push(line);
-        line = ch;
-        if (lines.length >= maxLines) return { lines, truncated: true };
-      } else {
-        line = test;
-      }
-    }
-    if (line) lines.push(line);
-    if (lines.length > maxLines) {
-      return { lines: lines.slice(0, maxLines), truncated: true };
-    }
-    return { lines, truncated: false };
-  }
-
-  // 風船の見た目（背景・タグ・タイトル・本文）をCanvasに描いて、Cesiumのビルボード用画像にする
-  function drawPaperCanvas(record, isMine) {
-    const canvas = document.createElement("canvas");
-    canvas.width = BALLOON_CANVAS_W;
-    canvas.height = BALLOON_CANVAS_H;
-    const ctx = canvas.getContext("2d");
-    const pad = 22;
-    const radius = 10; // 紙っぽく、角丸は控えめにする
-
-    // 紙本体（角丸控えめの四角、クリーム色の背景＝メモ用紙っぽい色味）
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = "#fffaf0";
-    roundRectPath(ctx, pad, pad, canvas.width - pad * 2, canvas.height - pad * 2, radius);
-    ctx.fill();
-    ctx.restore();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#c9b899";
-    roundRectPath(ctx, pad, pad, canvas.width - pad * 2, canvas.height - pad * 2, radius);
-    ctx.stroke();
-
-    // 上端中央に、風船の紐で結んだ「留め具」っぽい丸印を描く
-    ctx.fillStyle = "#ff6fae";
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, pad + 6, 9, 0, Math.PI * 2);
-    ctx.fill();
-
-    const innerX = pad + 20;
-    let y = pad + 40;
-
-    // 種類タグ
-    const tagText = labelForType(record.type);
-    ctx.font = "bold 18px sans-serif";
-    const tagW = ctx.measureText(tagText).width + 24;
-    ctx.fillStyle = colorForType(record.type);
-    roundRectPath(ctx, innerX, y - 24, tagW, 32, 16);
-    ctx.fill();
-    ctx.fillStyle = "#0a0d16";
-    ctx.textBaseline = "middle";
-    ctx.fillText(tagText, innerX + 12, y - 7);
-    y += 26;
-
-    // タイトル
-    ctx.font = "bold 24px sans-serif";
-    ctx.fillStyle = "#1a1a1a";
-    const titleResult = wrapJapaneseText(ctx, record.title || "", canvas.width - pad * 2 - 40, 2);
-    titleResult.lines.forEach((line) => {
-      y += 32;
-      ctx.fillText(line + (titleResult.truncated && line === titleResult.lines[titleResult.lines.length - 1] ? "…" : ""), innerX, y);
+    nearby.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "listItem";
+      const mine = item.r.reporterId === MY_REPORTER_ID ? `<div class="mine">★ あなたの投稿</div>` : "";
+      row.innerHTML = `
+        <div class="listItemTitleRow">
+          <span class="dot" style="background:${colorForType(item.r.type)}"></span>
+          <span class="titleText">${escapeHtml(item.r.title || "")}</span>
+          <span class="arrow">▶</span>
+        </div>
+        <div class="listItemBody">${escapeHtml(item.r.content || "")}${mine}</div>
+      `;
+      row.querySelector(".listItemTitleRow").addEventListener("click", () => {
+        const wasOpen = row.classList.contains("open");
+        body.querySelectorAll(".listItem.open").forEach((el) => el.classList.remove("open"));
+        if (wasOpen) {
+          clearSelectionPillar();
+        } else {
+          row.classList.add("open");
+          showSelectionPillar(item.loc, item.groundH, colorForType(item.r.type));
+        }
+      });
+      body.appendChild(row);
     });
 
-    // 本文
-    y += 14;
-    ctx.font = "18px sans-serif";
-    ctx.fillStyle = "#555555";
-    const contentResult = wrapJapaneseText(ctx, record.content || "", canvas.width - pad * 2 - 40, 3);
-    contentResult.lines.forEach((line, i) => {
-      y += 26;
-      const isLast = i === contentResult.lines.length - 1;
-      ctx.fillText(line + (contentResult.truncated && isLast ? "…" : ""), innerX, y);
-    });
-
-    // 自分の投稿マーク
-    if (isMine) {
-      ctx.font = "bold 17px sans-serif";
-      ctx.fillStyle = "#b8860b";
-      ctx.fillText("★ あなたの投稿", innerX, canvas.height - pad - 14);
-    }
-
-    return canvas;
+    document.getElementById("listPanel").classList.add("show");
+    listPanelOpen = true;
   }
 
-  function roundRectPath(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  function closeListPanel() {
+    document.getElementById("listPanel").classList.remove("show");
+    listPanelOpen = false;
+    clearSelectionPillar();
   }
+  document.getElementById("listPanelCloseBtn").addEventListener("click", closeListPanel);
 
   // ★重要：CesiumのScreenSpaceEventHandlerは、同じイベント種類（LEFT_CLICK）に対して
   // 　setInputActionを複数回呼ぶと、後から登録した方が前のものを完全に上書きしてしまう。
@@ -782,98 +722,14 @@ function renderDebugLog() {
   // 　実際の登録は後方の「気になる場所を選ぶモード」セクションで、1つのハンドラにまとめて行う。
   function showInfoForTap(click) {
     const picked = viewer.scene.pick(click.position);
-    if (!picked || !picked.id) {
-      clearBubbles();
-      return;
-    }
+    if (!picked || !picked.id) return;
     const r = plantEntities.get(picked.id.id);
-    if (!r) {
-      clearBubbles();
-      return;
-    }
-
-    // 既に表示中の風船をタップした場合は、作り直さずその風船を「つつく」だけにする
-    // （毎回作り直すと、揺れてる途中の状態がリセットされてしまうため）
-    const already = activeBubbles.find((b) => b.recordId === r.id);
-    if (already) {
-      pokeBalloon(already, (Math.random() - 0.5) * 3.5);
-      clearTimeout(bubbleHideTimer);
-      bubbleHideTimer = setTimeout(clearBubbles, 6000);
-      return;
-    }
-
+    if (!r) return;
     const tapped = plantedList.find((p) => p.r.id === r.id);
     if (!tapped) return;
-
-    // タップした木を中心に、近くにある投稿もまとめて拾う（距離が近い順、上限あり）
-    const nearby = plantedList
-      .map((p) => ({ p, dist: metersBetween(p.loc, tapped.loc) }))
-      .filter((x) => x.dist <= NEARBY_RADIUS_M)
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, MAX_BUBBLES)
-      .map((x) => x.p);
-
-    clearBubbles();
-    clearTimeout(bubbleHideTimer);
-
-    nearby.forEach((item) => {
-      const isMine = item.r.reporterId === MY_REPORTER_ID;
-      const paperCanvas = drawPaperCanvas(item.r, isMine);
-      const attachPos = Cesium.Cartesian3.fromDegrees(item.loc.lon, item.loc.lat, item.canopyCenterY + 1.1);
-      const paperHeightM = PAPER_WIDTH_M * (BALLOON_CANVAS_H / BALLOON_CANVAS_W);
-
-      // 風船本体（本物の3D球体。ピンク色でよく目立つように）
-      const balloonEntity = viewer.entities.add({
-        position: attachPos, // 初期位置。実際の位置は毎フレームupdateBalloon3Dで物理演算に基づいて更新される
-        ellipsoid: {
-          radii: new Cesium.Cartesian3(BALLOON_RADIUS_M, BALLOON_RADIUS_M, BALLOON_RADIUS_M * 1.2),
-          material: Cesium.Color.fromCssColorString("#ff6fae").withAlpha(0.95),
-          outline: true, outlineColor: Cesium.Color.WHITE.withAlpha(0.7), outlineWidth: 2,
-        },
-      });
-      // 紙（コメントを描いたCanvas板）。風船の下に結び付けられる
-      const paperEntity = viewer.entities.add({
-        position: attachPos,
-        show: showPaper,
-        billboard: {
-          image: paperCanvas,
-          width: PAPER_WIDTH_M, height: paperHeightM, sizeInMeters: true,
-          verticalOrigin: Cesium.VerticalOrigin.TOP, // 上端が結び目に来るように
-          disableDepthTestDistance: Number.POSITIVE_INFINITY, // 建物等に隠れず、常に文章が読めるようにする
-        },
-      });
-      // 木のてっぺん→風船
-      const stringEntity = viewer.entities.add({
-        polyline: {
-          positions: [attachPos, attachPos],
-          width: 2,
-          material: Cesium.Color.WHITE.withAlpha(0.8),
-        },
-      });
-      // 風船→紙（結び目）
-      const tieEntity = viewer.entities.add({
-        show: showPaper,
-        polyline: {
-          positions: [attachPos, attachPos],
-          width: 1.5,
-          material: Cesium.Color.fromCssColorString("#ff6fae").withAlpha(0.8),
-        },
-      });
-      // 風船・紙、どちらをタップしても反応するようにする
-      plantEntities.set(balloonEntity.id, item.r);
-      plantEntities.set(paperEntity.id, item.r);
-
-      activeBubbles.push({
-        recordId: item.r.id, loc: item.loc, canopyCenterY: item.canopyCenterY,
-        balloonEntity, paperEntity, stringEntity, tieEntity,
-        swayAngle: (Math.random() - 0.5) * 0.3, // 出現直後、少し揺れた状態から始めることで「ふわっと出た感」を出す
-        swayVel: (Math.random() - 0.5) * 1.2,
-      });
-    });
-
-    logDebug(`風船表示: 中心=${r.title} 周辺含め${nearby.length}件`);
-    bubbleHideTimer = setTimeout(clearBubbles, 6000);
+    openListPanel(tapped);
   }
+
 
 
   document.getElementById("infoBtn").addEventListener("click", (e) => {
@@ -912,7 +768,7 @@ function renderDebugLog() {
 
   function enterPlantMode() {
     plantMode = true;
-    clearBubbles();
+    closeListPanel();
     plantHint.classList.add("show");
     const pos = viewer.camera.positionCartographic;
     prePlantCamera = { lon: pos.longitude, lat: pos.latitude, height: pos.height, heading: viewer.camera.heading, pitch: viewer.camera.pitch };
