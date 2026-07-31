@@ -723,8 +723,7 @@ function renderDebugLog() {
      ============================================================ */
   const NEARBY_RADIUS_M = 8; // この範囲内の投稿を、まとめて一覧に出す
   let listPanelOpen = false;
-  let selectionRingEntity = null;
-  let selectionAuraEntity = null;
+  let selectionCylinderEntity = null;
   const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   // 2地点間のだいたいの距離（メートル）。狭い範囲の比較用なので簡易計算で十分
@@ -739,30 +738,23 @@ function renderDebugLog() {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   }
 
-  // 選んだ木を、「自分の投稿」を示す時と同じ、ふわっと透けるオーラでやんわり示す
-  // （光の柱だと主張が強すぎたため、既存の myring_/myaura_ と同じ見た目に統一した）
-  function showSelectionGlow(loc, groundH, canopyCenterY, canopyR) {
+  // 選んだ投稿の場所を、半透明の円柱でやんわりと分かりやすく示す
+  // （以前試した「光の柱」は主張が強すぎ、その後の「オーラ」は逆に見えにくかったため、
+  // 　半透明の円柱という、間を取った表現にした）
+  function showSelectionGlow(loc, groundH) {
     clearSelectionGlow();
-    selectionRingEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + 0.05),
-      ellipse: {
-        semiMinorAxis: canopyR * 1.3, semiMajorAxis: canopyR * 1.3,
-        material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.3),
-        outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166"), outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      },
-    });
-    selectionAuraEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, canopyCenterY),
-      billboard: {
-        image: auraSvg(), width: canopyR * 2.4, height: canopyR * 2.4, sizeInMeters: true,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    const len = 14, r = 1.4;
+    selectionCylinderEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
+      cylinder: {
+        length: len, topRadius: r, bottomRadius: r,
+        material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.35),
+        outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.75),
       },
     });
   }
   function clearSelectionGlow() {
-    if (selectionRingEntity) { viewer.entities.remove(selectionRingEntity); selectionRingEntity = null; }
-    if (selectionAuraEntity) { viewer.entities.remove(selectionAuraEntity); selectionAuraEntity = null; }
+    if (selectionCylinderEntity) { viewer.entities.remove(selectionCylinderEntity); selectionCylinderEntity = null; }
   }
 
   function openListPanel(centerItem) {
@@ -795,7 +787,7 @@ function renderDebugLog() {
           clearSelectionGlow();
         } else {
           row.classList.add("open");
-          showSelectionGlow(item.loc, item.groundH, item.canopyCenterY, item.canopyR);
+          showSelectionGlow(item.loc, item.groundH);
         }
       });
       body.appendChild(row);
@@ -917,10 +909,18 @@ function renderDebugLog() {
     logDebug('報告予定地点を設定: lat=' + pendingLoc.lat.toFixed(6) + ' lon=' + pendingLoc.lon.toFixed(6));
 
     if (previewEntity) viewer.entities.remove(previewEntity);
+    const previewLen = 16, previewR = 1.3;
+    // 即座に大まかな高さで表示 → 実際の地面の高さが分かり次第、位置を合わせ直す
     previewEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(pendingLoc.lon, pendingLoc.lat, 0),
-      point: { pixelSize: 16, color: Cesium.Color.fromCssColorString("#ffd166"), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      position: Cesium.Cartesian3.fromDegrees(pendingLoc.lon, pendingLoc.lat, REFERENCE_GROUND_HEIGHT + previewLen / 2),
+      cylinder: {
+        length: previewLen, topRadius: previewR, bottomRadius: previewR,
+        material: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.4),
+        outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffd166").withAlpha(0.8),
+      },
+    });
+    groundHeightAt(pendingLoc.lat, pendingLoc.lon).then((h) => {
+      if (previewEntity) previewEntity.position = Cesium.Cartesian3.fromDegrees(pendingLoc.lon, pendingLoc.lat, h + previewLen / 2);
     });
     plantConfirmBar.classList.add("show");
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -940,11 +940,14 @@ function renderDebugLog() {
 
   async function previewSpot(loc) {
     const groundH = await groundHeightAt(loc.lat, loc.lon);
-    addDebugPillar(loc.lat, loc.lon, groundH, "#4ade80");
+    const len = 16, r = 1.3;
     viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH),
-      point: { pixelSize: 20, color: Cesium.Color.fromCssColorString("#4ade80"),
-        outlineColor: Cesium.Color.BLACK, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      position: Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, groundH + len / 2),
+      cylinder: {
+        length: len, topRadius: r, bottomRadius: r,
+        material: Cesium.Color.fromCssColorString("#4ade80").withAlpha(0.4),
+        outline: true, outlineColor: Cesium.Color.fromCssColorString("#4ade80").withAlpha(0.8),
+      },
       label: { text: "ここで報告します（この端末だけのプレビュー・承認されると本表示）", font: "bold 12px sans-serif",
         fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -30),
