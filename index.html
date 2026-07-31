@@ -37,12 +37,10 @@
   .stat b{ display:block; font-size:17px; line-height:1.1; color:var(--accent); }
   .stat small{ font-size:10px; color:var(--sub); }
 
-  #ticker{ position:fixed; bottom:158px; left:50%; transform:translateX(-50%) translateY(16px);
-    max-width:min(520px,86vw); text-align:center; font-size:12.5px; background:var(--panel);
-    border:1px solid var(--border); border-radius:999px; padding:8px 18px; backdrop-filter:blur(6px);
-    opacity:0; transition:opacity 1.1s ease, transform 1.1s ease;
-    z-index:14; pointer-events:none; }
-  #ticker.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #ticker{ position:fixed; left:0; top:0; transform:translate(-50%, -100%); display:none;
+    max-width:min(320px,80vw); white-space:nowrap; text-align:center; font-size:12.5px;
+    background:var(--panel); border:1px solid var(--border); border-radius:999px;
+    padding:7px 16px; backdrop-filter:blur(6px); z-index:14; pointer-events:none; }
 
   #listPanel{ position:fixed; left:0; right:0; bottom:0; max-height:56vh; background:var(--panel);
     border-top:1px solid var(--border); border-radius:18px 18px 0 0; backdrop-filter:blur(10px);
@@ -587,7 +585,8 @@ function renderDebugLog() {
   }
 
   /* ============================================================
-     画面に映ってる木のタイトルを、1つずつゆっくり見せるアンビエント表示
+     画面に映ってる木のタイトルを、1つずつ「その木から立ち上る」ように見せる
+     ・木の実際の画面上の位置を毎フレーム計算し、そこから上に浮かびながらフェードイン→フェードアウトする
      ・同時に出すと重なるので、常に1件だけを順番に見せる
      ・一覧パネルが開いてる間は邪魔になるので止める
      ============================================================ */
@@ -606,20 +605,58 @@ function renderDebugLog() {
     return best;
   }
 
-  function showTitleTicker(p) {
+  const TICKER_DURATION_MS = 3200; // 表示している時間（フェードイン〜フェードアウトの合計）
+  const TICKER_RISE_PX = 60;       // この間に、画面上でどれだけ上に浮かび上がるか
+  let floatingTitle = null; // { el, loc, height, startTime }
+
+  function showTitleFromTree(p) {
     const el = document.getElementById("ticker");
     const icon = p.r.type === "positive" ? "🌳" : "🌲";
     el.textContent = `${icon} ${p.r.title}`;
-    el.classList.add("show");
-    clearTimeout(tickerHideTimer);
-    tickerHideTimer = setTimeout(() => el.classList.remove("show"), 3200);
+    el.style.display = "block";
+    floatingTitle = {
+      el,
+      loc: p.loc,
+      height: p.canopyCenterY + 1.1, // 木のてっぺん付近から立ち上らせる
+      startTime: performance.now(),
+    };
   }
 
-  let tickerHideTimer = null;
+  // 毎フレーム、木の位置（カメラが動けば画面上の位置も変わる）を再計算しつつ、
+  // 経過時間に応じて「上に浮かぶ量」と「不透明度（フェードイン→保持→フェードアウト）」を更新する
+  function updateFloatingTitle() {
+    if (!floatingTitle) return;
+    const elapsed = performance.now() - floatingTitle.startTime;
+    const t = elapsed / TICKER_DURATION_MS;
+    if (t >= 1) {
+      floatingTitle.el.style.display = "none";
+      floatingTitle = null;
+      return;
+    }
+
+    const pos = Cesium.Cartesian3.fromDegrees(floatingTitle.loc.lon, floatingTitle.loc.lat, floatingTitle.height);
+    const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
+    if (!win) { floatingTitle.el.style.display = "none"; return; }
+
+    // フェードイン（最初の15%）→保持→フェードアウト（最後の30%）
+    let opacity;
+    if (t < 0.15) opacity = t / 0.15;
+    else if (t > 0.7) opacity = Math.max(0, (1 - t) / 0.3);
+    else opacity = 1;
+
+    const rise = TICKER_RISE_PX * t; // 時間とともに、じわじわ上へ
+
+    floatingTitle.el.style.display = "block";
+    floatingTitle.el.style.left = win.x + "px";
+    floatingTitle.el.style.top = (win.y - rise) + "px";
+    floatingTitle.el.style.opacity = opacity;
+  }
+  viewer.scene.preRender.addEventListener(updateFloatingTitle);
+
   function ambientTickerLoop() {
     if (!listPanelOpen) {
       const candidate = pickInViewCandidate();
-      if (candidate) showTitleTicker(candidate);
+      if (candidate) showTitleFromTree(candidate);
     }
     setTimeout(ambientTickerLoop, 4500); // 次の1件まで、読める間隔をあける
   }
