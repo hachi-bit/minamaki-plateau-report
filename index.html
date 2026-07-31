@@ -132,6 +132,7 @@
   <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
   <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
   <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
+  <button class="iconBtn" id="paperToggleBtn" title="紙の表示切り替え（デバッグ用：風船だけ確認できる）">📄</button>
   <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
 </div>
 
@@ -362,6 +363,20 @@ function renderDebugLog() {
       btn.textContent = "✅ コピーした！";
       setTimeout(() => (btn.textContent = "📋 この視点をコピー"), 1800);
     });
+  });
+
+  /* ============================================================
+     📄 紙の表示切り替え（デバッグ用：風船だけを確認したい時に使う）
+     ============================================================ */
+  let showPaper = true;
+  document.getElementById("paperToggleBtn").addEventListener("click", (e) => {
+    showPaper = !showPaper;
+    e.currentTarget.classList.toggle("active", !showPaper);
+    activeBubbles.forEach((b) => {
+      if (b.paperEntity) b.paperEntity.show = showPaper;
+      if (b.tieEntity) b.tieEntity.show = showPaper;
+    });
+    logDebug(`紙の表示: ${showPaper ? "ON（通常）" : "OFF（風船だけ確認モード）"}`);
   });
 
   /* ============================================================
@@ -603,7 +618,7 @@ function renderDebugLog() {
 
   // ===== 風船の物理演算（バネ＋減衰付きの振り子） =====
   const BALLOON_STRING_LEN = 1.6; // 木から風船までの紐の長さ（メートル）
-  const BALLOON_RADIUS_M = 0.55;  // 風船（本物の3D球体）の半径
+  const BALLOON_RADIUS_M = 0.75;  // 風船（本物の3D球体）の半径
   const BALLOON_SPRING_K = 20;    // 元の位置に戻ろうとする力の強さ
   const BALLOON_DAMPING = 3.0;    // 揺れが収まる速さ（大きいほど早く止まる）
   const PAPER_WIDTH_M = 2.3;      // 紙（コメントを書いた板）の実寸の幅（メートル）
@@ -637,7 +652,8 @@ function renderDebugLog() {
 
     // 紙（コメントを書いた板）は、風船のすぐ下に「結び付けられてる」位置に配置する
     // （風船と同じ揺れに完全に追従するので、別の物理演算は不要）
-    const paperDrop = Cesium.Cartesian3.multiplyByScalar(up, -BALLOON_RADIUS_M * 1.05, new Cesium.Cartesian3());
+    // 紙は風船からしっかり離す（近すぎると、常に手前描画される紙が風船を覆い隠してしまうため）
+    const paperDrop = Cesium.Cartesian3.multiplyByScalar(up, -(BALLOON_RADIUS_M + 0.6), new Cesium.Cartesian3());
     const paperPos = Cesium.Cartesian3.add(balloonPos, paperDrop, new Cesium.Cartesian3());
 
     b.balloonEntity.position = balloonPos;
@@ -818,6 +834,7 @@ function renderDebugLog() {
       // 紙（コメントを描いたCanvas板）。風船の下に結び付けられる
       const paperEntity = viewer.entities.add({
         position: attachPos,
+        show: showPaper,
         billboard: {
           image: paperCanvas,
           width: PAPER_WIDTH_M, height: paperHeightM, sizeInMeters: true,
@@ -835,6 +852,7 @@ function renderDebugLog() {
       });
       // 風船→紙（結び目）
       const tieEntity = viewer.entities.add({
+        show: showPaper,
         polyline: {
           positions: [attachPos, attachPos],
           width: 1.5,
