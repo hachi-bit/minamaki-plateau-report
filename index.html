@@ -103,7 +103,7 @@
     border:1px solid #ff6b35; color:#ff9f6b; padding:8px 16px; border-radius:8px; font-size:12px; z-index:20; display:none; }
   #meteorHint.show{ display:block; }
 
-  #meteorPanel{ position:fixed; right:16px; bottom:250px; width:min(230px,78vw); background:var(--panel);
+  #meteorPanel{ position:fixed; left:16px; bottom:250px; width:min(230px,78vw); background:var(--panel);
     border:1px solid var(--border); border-radius:12px; padding:12px 14px; backdrop-filter:blur(6px);
     z-index:20; display:none; }
   #meteorPanel.show{ display:block; }
@@ -179,12 +179,8 @@
 
 <div id="meteorPanel">
   <div style="font-size:11px;color:var(--sub);margin-bottom:8px;">☄️ 隕石の設定</div>
-  <label class="meteorSliderLabel">爆発範囲 <span id="meteorRadiusVal"></span>m</label>
-  <input type="range" id="meteorRadiusSlider" min="5" max="60" value="20" />
-  <label class="meteorSliderLabel">隕石の大きさ <span id="meteorSizeVal"></span>m</label>
+  <label class="meteorSliderLabel">隕石の大きさ <span id="meteorSizeVal"></span>m（爆発範囲もこれに連動）</label>
   <input type="range" id="meteorSizeSlider" min="1" max="10" value="4" />
-  <label class="meteorSliderLabel">破片の数 <span id="meteorParticleVal"></span></label>
-  <input type="range" id="meteorParticleSlider" min="10" max="200" value="70" />
 </div>
 
 <div id="debugLogPanel">
@@ -477,27 +473,18 @@ function renderDebugLog() {
      ・ページを再読み込みすれば、すべて元通りに見える（新しくデータを取り直すから）
      ============================================================ */
   let meteorMode = false;
-  let meteorBlastRadius = 20;
   let meteorSize = 4;
-  let meteorParticleCount = 70;
+  const METEOR_BLAST_MULTIPLIER = 5; // 爆発範囲(m) = 隕石の大きさ × これ
 
   const meteorHint = document.getElementById("meteorHint");
   const meteorPanel = document.getElementById("meteorPanel");
-  const meteorRadiusSlider = document.getElementById("meteorRadiusSlider");
   const meteorSizeSlider = document.getElementById("meteorSizeSlider");
-  const meteorParticleSlider = document.getElementById("meteorParticleSlider");
-  const meteorRadiusVal = document.getElementById("meteorRadiusVal");
   const meteorSizeVal = document.getElementById("meteorSizeVal");
-  const meteorParticleVal = document.getElementById("meteorParticleVal");
 
   function refreshMeteorLabels() {
-    meteorRadiusVal.textContent = meteorBlastRadius;
     meteorSizeVal.textContent = meteorSize;
-    meteorParticleVal.textContent = meteorParticleCount;
   }
-  meteorRadiusSlider.addEventListener("input", (e) => { meteorBlastRadius = Number(e.target.value); refreshMeteorLabels(); });
   meteorSizeSlider.addEventListener("input", (e) => { meteorSize = Number(e.target.value); refreshMeteorLabels(); });
-  meteorParticleSlider.addEventListener("input", (e) => { meteorParticleCount = Number(e.target.value); refreshMeteorLabels(); });
   refreshMeteorLabels();
 
   document.getElementById("meteorToggleBtn").addEventListener("click", (e) => {
@@ -528,9 +515,80 @@ function renderDebugLog() {
     requestAnimationFrame(tick);
   }
 
+  // 破片（デブリ）を、飛び散る物理的な動き（初速＋重力）付きで生成する
+  // ・隕石が砕ける時にも、建物が壊れる時にも、両方これを使い回す
+  const GRAVITY = 15; // 見栄え優先で、現実よりやや強めの重力にしている
+  function spawnDebris(originLon, originLat, originHeight, count, baseSize, colors) {
+    const fragments = [];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 3 + Math.random() * 7;
+      const upSpeed = 4 + Math.random() * 8;
+      const size = baseSize * (0.4 + Math.random() * 0.8);
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const dims = new Cesium.Cartesian3(size, size * (0.6 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.6));
+      const entity = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight),
+        box: { dimensions: dims, material: Cesium.Color.fromCssColorString(color) },
+      });
+      fragments.push({
+        entity, lon: originLon, lat: originLat, baseHeight: originHeight,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, vz: upSpeed,
+        spinSeed: Math.random() * 1000,
+      });
+    }
+    return fragments;
+  }
+
+  function animateDebris(fragments, lifetimeMs) {
+    const start = performance.now();
+    function tick() {
+      const elapsed = performance.now() - start;
+      if (elapsed >= lifetimeMs) {
+        fragments.forEach((f) => viewer.entities.remove(f.entity));
+        return;
+      }
+      const t = elapsed / 1000; // 秒
+      fragments.forEach((f) => {
+        const dx = f.vx * t, dy = f.vy * t;
+        const dz = f.vz * t - 0.5 * GRAVITY * t * t;
+        const dist = Math.hypot(dx, dy);
+        const loc = dist > 0.001 ? offsetLatLon(f.lat, f.lon, Math.atan2(dy, dx), dist) : { lat: f.lat, lon: f.lon };
+        const h = Math.max(f.baseHeight, f.baseHeight + dz);
+        const pos = Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, h);
+        f.entity.position = pos;
+        f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+          pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
+        );
+        // 落ちきったら消す（地面に埋まって見えるのを防ぐ）
+        if (dz < -3) f.entity.show = false;
+      });
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // PLATEAUの建物データから高さを取得する（属性名がデータによって違うため、候補を順に試す）
+  function getBuildingHeightM(feature) {
+    const candidates = ["measuredHeight", "bldg:measuredHeight", "建物高さ", "height", "Height"];
+    for (const key of candidates) {
+      try {
+        const v = feature.getProperty(key);
+        if (typeof v === "number" && v > 0) return v;
+      } catch (e) { /* このプロパティは無いだけなので無視 */ }
+    }
+    return 10; // 取得できなかった場合の、それらしいデフォルト値（3階建て程度）
+  }
+
   // 着弾地点の周辺を、円状に何点かサンプリングして、そこにある建物をまとめて非表示にする
   // （3D Tilesには「範囲内の建物を一括取得」というAPIが無いため、画面上の複数地点をピックして
   // 　拾う、という力技で近似している。精度はそこそこ、という前提で使う）
+  // ★体積の目安について：
+  // 　PLATEAUには正確な「体積」の属性は無いことが多いが、
+  // 　「同じ建物に何回サンプリング点が命中したか」を数えれば、その建物が
+  // 　サンプリング範囲内でどれだけ広い面積を占めてるかの目安になる。
+  // 　この「広さの目安 × 高さ」で、低くて広い建物・高くて狭い建物、どちらも
+  // 　それらしい体積感で破片の量に反映されるようにしている。
   function blastBuildingsAt(lon, lat, radiusM) {
     const samplePoints = [{ lon, lat }];
     const rings = 3;
@@ -542,48 +600,91 @@ function renderDebugLog() {
         samplePoints.push(offsetLatLon(lat, lon, angle, dist));
       }
     }
+    const areaPerSample = (Math.PI * radiusM * radiusM) / samplePoints.length; // 1サンプル点あたりが代表する面積(m²)の目安
 
-    let hiddenCount = 0;
-    const seen = new Set();
+    // まず全サンプル点をピックして、建物ごとに「何回当たったか」「どのあたりにあるか」を集計する
+    const hitMap = new Map(); // key -> { feature, hitCount, lonSum, latSum }
     samplePoints.forEach((p) => {
       const pos = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, REFERENCE_GROUND_HEIGHT + 5);
       const win = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
       if (!win) return;
       const picks = viewer.scene.drillPick(win, 5);
       picks.forEach((picked) => {
-        if (picked instanceof Cesium.Cesium3DTileFeature) {
-          const key = picked.getProperty("gml_id") || picked.getProperty("building_id") || JSON.stringify(picked);
-          if (seen.has(key)) return;
-          seen.add(key);
-          picked.show = false;
-          hiddenCount++;
-        }
+        if (!(picked instanceof Cesium.Cesium3DTileFeature)) return;
+        const key = picked.getProperty("gml_id") || picked.getProperty("building_id") || JSON.stringify(picked);
+        if (!hitMap.has(key)) hitMap.set(key, { feature: picked, hitCount: 0, lonSum: 0, latSum: 0 });
+        const entry = hitMap.get(key);
+        entry.hitCount++;
+        entry.lonSum += p.lon;
+        entry.latSum += p.lat;
       });
     });
-    logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にしました（半径${radiusM}m目安）`);
+
+    // 集計結果をもとに、建物ごとに非表示化＋体積目安に応じた破片を飛び散らせる
+    let hiddenCount = 0;
+    const buildingColors = ["#8a8a86", "#6e6e6a", "#a3978a", "#5c4433"];
+    hitMap.forEach((entry) => {
+      entry.feature.show = false;
+      hiddenCount++;
+
+      const centerLon = entry.lonSum / entry.hitCount;
+      const centerLat = entry.latSum / entry.hitCount;
+      const heightM = getBuildingHeightM(entry.feature);
+      const footprintAreaApprox = entry.hitCount * areaPerSample; // ㎡の目安
+      const volumeApprox = footprintAreaApprox * heightM;         // ㎥の目安（低くて広い建物も反映される）
+
+      // 体積そのまま使うと数が飛躍しすぎるので、立方根でスケールを緩やかにする
+      const scaleFactor = Math.cbrt(volumeApprox);
+      const fragCount = Math.max(4, Math.min(60, Math.round(scaleFactor * 2.4)));
+      const fragSize = Math.max(0.8, Math.min(4.5, scaleFactor / 6));
+      const debris = spawnDebris(centerLon, centerLat, REFERENCE_GROUND_HEIGHT + heightM * 0.4, fragCount, fragSize, buildingColors);
+      animateDebris(debris, 1600);
+    });
+    logDebug(`☄️着弾：建物 ${hiddenCount} 件を非表示にし、体積の目安に応じた破片を飛び散らせました（半径${radiusM}m目安）`);
   }
 
-  // 隕石の落下→着弾→爆発パーティクル、の一連の演出
+  // 隕石の落下→着弾→崩壊、の一連の演出
   async function strikeMeteor(lat, lon) {
     const groundH = await groundHeightAt(lat, lon);
-    // ★以前は+400mから落としてたけど、カメラが斜め下を見てる時は画面の外（視界外）に
-    // 　なってしまい、見えないまま終わってた。もっと低い位置から落とすようにする。
-    const startHeight = groundH + 120;
     const durationMs = 1400;
-    const glowSize = meteorSize * 4; // 本体だけやと小さく見えにくいので、グローを大きめにして目立たせる
+    const glowSize = meteorSize * 3.5;
+    const blastRadius = meteorSize * METEOR_BLAST_MULTIPLIER;
 
-    const meteorEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, startHeight),
-      ellipsoid: {
-        radii: new Cesium.Cartesian3(meteorSize, meteorSize, meteorSize),
-        material: Cesium.Color.fromCssColorString("#ff6b35").withAlpha(0.95),
-      },
-    });
-    // ★風船の時と同じ教訓：実体（ellipsoid）だけだと奥にあるものに埋もれたり、
-    // 　距離によっては小さく見えにくかったりする。常に手前に光るビルボードを重ねて、
-    // 　絶対に見失わないようにする。
+    // ★垂直に落とすと単調なので、「画面の右上・少し手前」から斜めに降ってくる軌道にする。
+    // 　カメラ自身の「右」「上」「進行方向」ベクトルを基準にオフセットすることで、
+    // 　カメラがどの向きを見ていても、常に画面内で映える斜めの軌道になるようにしている。
+    const impactPos = Cesium.Cartesian3.fromDegrees(lon, lat, groundH);
+    const campRight = viewer.camera.right;
+    const camUp = viewer.camera.up;
+    const camDir = viewer.camera.direction;
+    let startPos = Cesium.Cartesian3.add(impactPos, Cesium.Cartesian3.multiplyByScalar(campRight, 200, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    startPos = Cesium.Cartesian3.add(startPos, Cesium.Cartesian3.multiplyByScalar(camUp, 150, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+    startPos = Cesium.Cartesian3.add(startPos, Cesium.Cartesian3.multiplyByScalar(camDir, -70, new Cesium.Cartesian3()), new Cesium.Cartesian3()); // 手前（カメラに近い）方向
+
+    // ★「ふわっと透明な球」ではなく、いびつな岩の塊が寄り集まった見た目にする
+    // 　（3〜4個の箱をランダムにずらして重ね、ゴツゴツした質感を出す）
+    const rockPieceCount = 4;
+    const rockPieces = [];
+    for (let i = 0; i < rockPieceCount; i++) {
+      const offset = {
+        x: (Math.random() - 0.5) * meteorSize * 0.7,
+        y: (Math.random() - 0.5) * meteorSize * 0.7,
+        z: (Math.random() - 0.5) * meteorSize * 0.7,
+      };
+      const pieceSize = meteorSize * (0.55 + Math.random() * 0.5);
+      const color = i % 2 === 0 ? "#3d2b20" : "#5a4030"; // 岩っぽい暗めの茶色
+      const entity = viewer.entities.add({
+        position: startPos,
+        box: {
+          dimensions: new Cesium.Cartesian3(pieceSize, pieceSize * 0.85, pieceSize * 1.1),
+          material: Cesium.Color.fromCssColorString(color),
+        },
+      });
+      rockPieces.push({ entity, offset, spinSeed: Math.random() * 1000 });
+    }
+    // 常に手前に光る、燃えるグロー（実体が小さくても絶対に見失わないようにする）
     const meteorGlow = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, startHeight),
+      position: startPos,
       billboard: {
         image: fireGlowSvg(), width: glowSize, height: glowSize, sizeInMeters: true,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -593,49 +694,48 @@ function renderDebugLog() {
     const start = performance.now();
     await new Promise((resolve) => {
       function fall() {
-        const t = (performance.now() - start) / durationMs;
-        if (t >= 1) {
-          resolve();
-          return;
-        }
-        // 加速しながら落ちる（イーズイン）
-        const eased = t * t;
-        const h = startHeight - (startHeight - groundH) * eased;
-        const pos = Cesium.Cartesian3.fromDegrees(lon, lat, h);
-        meteorEntity.position = pos;
-        meteorGlow.position = pos;
+        const elapsed = performance.now() - start;
+        const t = elapsed / durationMs;
+        if (t >= 1) { resolve(); return; }
+        const eased = t * t; // 加速しながら落ちる（イーズイン）
+        // 開始地点→着弾地点を、直線的に補間する（＝斜めの軌道になる）
+        const centerPos = Cesium.Cartesian3.lerp(startPos, impactPos, eased, new Cesium.Cartesian3());
+        meteorGlow.position = centerPos;
+        // 岩の塊は、中心からのズレを保ったまま、少し回転もさせながら一緒に落ちる
+        const enu = Cesium.Transforms.eastNorthUpToFixedFrame(centerPos);
+        rockPieces.forEach((r) => {
+          const local = new Cesium.Cartesian3(r.offset.x, r.offset.y, r.offset.z);
+          const world = Cesium.Matrix4.multiplyByPoint(enu, local, new Cesium.Cartesian3());
+          r.entity.position = world;
+          r.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+            world, new Cesium.HeadingPitchRoll(r.spinSeed + elapsed * 0.01, elapsed * 0.008, elapsed * 0.006)
+          );
+        });
         requestAnimationFrame(fall);
       }
       requestAnimationFrame(fall);
     });
-    viewer.entities.remove(meteorEntity);
+    rockPieces.forEach((r) => viewer.entities.remove(r.entity));
     viewer.entities.remove(meteorGlow);
 
-    // 爆発パーティクル
-    const burstPos = Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 2);
-    const particleSystem = viewer.scene.primitives.add(new Cesium.ParticleSystem({
-      image: 'data:image/svg+xml,' + encodeURIComponent(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#ffb347"/></svg>'
-      ),
-      startColor: Cesium.Color.fromCssColorString("#ffcf6b").withAlpha(1.0),
-      endColor: Cesium.Color.fromCssColorString("#ff6b35").withAlpha(0.0),
-      startScale: 1.0,
-      endScale: 3.5,
-      minimumParticleLife: 0.5,
-      maximumParticleLife: 1.1,
-      minimumSpeed: 5.0,
-      maximumSpeed: 5.0 + meteorBlastRadius * 0.8,
-      imageSize: new Cesium.Cartesian2(20, 20),
-      emissionRate: 0, // burstで一気に出すので、通常放出は無し
-      lifetime: 1.2,
-      emitter: new Cesium.SphereEmitter(0.5),
-      modelMatrix: Cesium.Transforms.eastNorthUpToFixedFrame(burstPos),
-      bursts: [new Cesium.ParticleBurst({ time: 0.0, minimum: meteorParticleCount, maximum: meteorParticleCount })],
-    }));
-    setTimeout(() => viewer.scene.primitives.remove(particleSystem), 1500);
+    // 着弾の瞬間の閃光（一瞬だけ光を出す）
+    const flashPos = Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 2);
+    const flash = viewer.entities.add({
+      position: flashPos,
+      billboard: {
+        image: fireGlowSvg(), width: blastRadius * 1.4, height: blastRadius * 1.4, sizeInMeters: true,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    setTimeout(() => viewer.entities.remove(flash), 300);
+
+    // 隕石自身も、着弾で岩の破片となって飛び散る
+    const meteorDebris = spawnDebris(lon, lat, groundH + 1, Math.max(8, Math.round(meteorSize * 4)), meteorSize * 0.5,
+      ["#3d2b20", "#5a4030", "#ff9d3f"]);
+    animateDebris(meteorDebris, 1300);
 
     shakeCamera(350, 14);
-    blastBuildingsAt(lon, lat, meteorBlastRadius);
+    blastBuildingsAt(lon, lat, blastRadius);
   }
 
   function updateCamPanel() {
@@ -1203,7 +1303,7 @@ function renderDebugLog() {
       }
       const carto = Cesium.Cartographic.fromCartesian(cartesian);
       const lat = Cesium.Math.toDegrees(carto.latitude), lon = Cesium.Math.toDegrees(carto.longitude);
-      logDebug(`☄️隕石発射: lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} 半径=${meteorBlastRadius}m`);
+      logDebug(`☄️隕石発射: lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} 半径=${meteorSize * METEOR_BLAST_MULTIPLIER}m`);
       strikeMeteor(lat, lon);
       return;
     }
