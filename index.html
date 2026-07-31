@@ -522,16 +522,19 @@ function renderDebugLog() {
     const fragments = [];
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 4 + Math.random() * 6;   // ★「ゆっくり」を意識しすぎて動かなさすぎたので、飛距離は出しつつ滞空時間で"ゆっくり感"を出す方針にした
+      const speed = 4 + Math.random() * 6;
       const upSpeed = 5 + Math.random() * 7;
-      const size = baseSize * (0.4 + Math.random() * 0.8) * 2;
+      const size = baseSize * (0.5 + Math.random() * 0.8) * 2;
       const color = colors[Math.floor(Math.random() * colors.length)];
-      const dims = new Cesium.Cartesian3(size, size * (0.6 + Math.random() * 0.6), size * (0.6 + Math.random() * 0.6));
+      // ★立体（box）だと、周りに残ってる他の建物の裏に隠れてしまい、
+      // 　密集した街中では実質見えなくなることが分かった（ログでは正常に動いてるのに、
+      // 　画面には映らない、という状態から特定）。
+      // 　常に手前に描画されるビルボード（板）に変更して、確実に見えるようにする。
       const entity = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(originLon, originLat, originHeight),
-        box: {
-          dimensions: dims, material: Cesium.Color.fromCssColorString(color),
-          outline: true, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1,
+        billboard: {
+          image: debrisSvg(color), width: size, height: size, sizeInMeters: true,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
       fragments.push({
@@ -569,9 +572,8 @@ function renderDebugLog() {
         const h = Math.max(f.baseHeight, f.baseHeight + dz);
         const pos = Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat, h);
         f.entity.position = pos;
-        f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
-          pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
-        );
+        // ビルボードは3D回転(orientation)ではなく、画面上でのくるくる回転(billboard.rotation)を使う
+        f.entity.billboard.rotation = f.spinSeed + elapsed * 0.006;
       });
       requestAnimationFrame(tick);
     }
@@ -723,22 +725,30 @@ function renderDebugLog() {
   // 岩の多面体プリミティブを作る（ローカル原点中心・半径1のジオメトリを1回だけ作り、
   // 　毎フレームは modelMatrix の再設定だけで移動・回転・拡大縮小させる、軽量な作り）
   function createRockPrimitive(colorHex) {
-    const geometry = createRockGeometry(0.45);
-    const instance = new Cesium.GeometryInstance({
-      geometry,
-      attributes: {
-        color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(colorHex)),
-      },
-    });
-    return viewer.scene.primitives.add(new Cesium.Primitive({
-      geometryInstances: instance,
-      appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: false }),
-      asynchronous: false,
-    }));
+    try {
+      const geometry = createRockGeometry(0.45);
+      const instance = new Cesium.GeometryInstance({
+        geometry,
+        attributes: {
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(colorHex)),
+        },
+      });
+      const primitive = viewer.scene.primitives.add(new Cesium.Primitive({
+        geometryInstances: instance,
+        appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: false }),
+        asynchronous: false,
+      }));
+      logDebug('🪨隕石の多面体プリミティブを生成しました');
+      return primitive;
+    } catch (e) {
+      logDebug(`⚠️隕石の多面体プリミティブ生成に失敗: ${e.message}`);
+      return null;
+    }
   }
 
   // 岩の多面体プリミティブを、指定した位置・向き・大きさに配置し直す
   function placeRockPrimitive(primitive, worldPos, scale, headingPitchRoll) {
+    if (!primitive) return; // 生成に失敗している場合は何もしない（グローだけは表示され続ける）
     const rotation = Cesium.Transforms.headingPitchRollQuaternion(worldPos, headingPitchRoll);
     primitive.modelMatrix = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
       worldPos, rotation, new Cesium.Cartesian3(scale, scale, scale)
@@ -792,7 +802,7 @@ function renderDebugLog() {
       }
       requestAnimationFrame(fall);
     });
-    viewer.scene.primitives.remove(rockPrimitive);
+    if (rockPrimitive) viewer.scene.primitives.remove(rockPrimitive);
     viewer.entities.remove(meteorGlow);
 
     // 着弾の瞬間の閃光（一瞬だけ光を出す）
@@ -930,6 +940,16 @@ function renderDebugLog() {
       + `<circle cx="60" cy="60" r="60" fill="url(#fg)"/>`
       + `</svg>`
     );
+  }
+
+  // 破片用の、岩っぽいいびつな四角のアイコン（指定した色で塗る）
+  function debrisSvg(colorHex) {
+    const c = colorHex.replace('#', '%23');
+    return ('data:image/svg+xml,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">`
+      + `<polygon points="6,10 24,4 36,16 30,34 10,36 3,22" fill="${c}" stroke="black" stroke-opacity="0.5" stroke-width="1.5"/>`
+      + `</svg>`
+    )).replace(/%2523/g, '%23');
   }
 
   // 同じ地点に複数投稿があっても重ならないよう、IDから決まる固定の小さなズレを入れる
