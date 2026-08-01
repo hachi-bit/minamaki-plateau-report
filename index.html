@@ -538,8 +538,17 @@ function renderDebugLog() {
           outline: true, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1,
         },
       });
+      // ★診断用（一時的）：箱と全く同じ座標に、絶対見えるはずのグローも重ねて置く。
+      // 　これで「箱だけ見えない」のか「そもそも位置自体がおかしい」のかを切り分ける。
+      const debugMarker = viewer.entities.add({
+        position: startPos,
+        billboard: {
+          image: fireGlowSvg(), width: size * 1.5, height: size * 1.5, sizeInMeters: true,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
       fragments.push({
-        entity, lon: originLon, lat: originLat, baseHeight: originHeight,
+        entity, debugMarker, lon: originLon, lat: originLat, baseHeight: originHeight,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, vz: upSpeed,
         spinSeed: Math.random() * 1000,
       });
@@ -558,7 +567,10 @@ function renderDebugLog() {
         firstTick = false;
       }
       if (elapsed >= lifetimeMs) {
-        fragments.forEach((f) => viewer.entities.remove(f.entity));
+        fragments.forEach((f) => {
+          viewer.entities.remove(f.entity);
+          if (f.debugMarker) viewer.entities.remove(f.debugMarker);
+        });
         logDebug(`💥破片アニメーション終了・削除しました`);
         return;
       }
@@ -576,6 +588,7 @@ function renderDebugLog() {
         f.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
           pos, new Cesium.HeadingPitchRoll(f.spinSeed + elapsed * 0.006, elapsed * 0.005, elapsed * 0.004)
         );
+        if (f.debugMarker) f.debugMarker.position = pos;
       });
       requestAnimationFrame(tick);
     }
