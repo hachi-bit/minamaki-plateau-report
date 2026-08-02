@@ -125,7 +125,7 @@
 
 <div id="hud">
   <div id="titleBox">
-    <h1>みなま木になるマップ</h1>
+    <h1 id="siteTitle">みなま木になるマップ</h1>
     <span>気になる　木になる</span>
   </div>
   <div id="stats">
@@ -190,10 +190,20 @@
 </div>
 
 <script>
-/* ============================================================
-   CONFIG
-   ============================================================ */
-const CONFIG = {
+/* ================================================================
+   ★★★ 町ごとに書き換える設定 ★★★
+   ・2026-08〜：GAS側の pushTownConfig() が生成する town-config.json から
+   　読み込む方式に変更した。ここに書いてある値は、あくまで
+   　「town-config.jsonの取得に失敗した時のフォールバック（保険）」であり、
+   　通常はこのファイルを直接書き換える必要はない。
+   ・町の設定を変えたい時は、GAS側のスクリプト プロパティ
+   　（SITE_TITLE / CAMERA_COORDS / BUILDING_URL_1 / BUILDING_URL_2）を編集して
+   　pushTownConfig() を実行すれば、このファイルを触らずに反映できる。
+   ================================================================ */
+
+// フォーム関連：公開JSONの取得先／報告フォームのURLと事前入力用パラメータ名
+// dataUrl（投稿データの取得先）だけは town-config.json 自体の置き場所と同じなので固定値のまま。
+let CONFIG = {
   dataUrl: "./data/concerns.json",
   formBaseUrl: "https://docs.google.com/forms/d/e/1FAIpQLSeK1BnxEFe2gPVOqga8qW_JWMEpKo3R2UXRllH742HYRE9O0Q/viewform",
   formReporterIdEntry: "entry.1280885733", // 報告者ID
@@ -201,38 +211,72 @@ const CONFIG = {
   formLonEntry: "entry.2084573593",        // 経度
 };
 
-// FreeDay版と同じPLATEAU Ionアカウントを流用（同一エリアのため）
+// 初期カメラ位置・向き（フォールバック値）
+let INITIAL_CAMERA = { lon: 139.525347, lat: 35.450514, height: 259.7, heading: 24.10, pitch: -52.00, roll: 0.00 };
+
+// 対象エリアの建物3D Tiles（フォールバック値）
+let BUILDING_URLS = [
+  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json', // 旭区
+  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod1-texture-2024/tileset.json', // 泉区
+];
+
+// サイトのタイトル・見出し（フォールバック値）
+let SITE_TITLE = "みなま木になるマップ";
+
+// town-config.json を取得し、成功すれば上記のCONFIG/INITIAL_CAMERA/BUILDING_URLS/SITE_TITLEを
+// 実際の町の値で上書きする。取得に失敗しても、上のフォールバック値でそのまま動き続ける。
+async function loadTownConfig() {
+  try {
+    const res = await fetch("./data/town-config.json", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const cfg = await res.json();
+
+    if (cfg.siteTitle) SITE_TITLE = cfg.siteTitle;
+    if (cfg.camera && typeof cfg.camera.lon === "number") INITIAL_CAMERA = cfg.camera;
+    if (Array.isArray(cfg.buildingUrls) && cfg.buildingUrls.length > 0) BUILDING_URLS = cfg.buildingUrls;
+    if (cfg.form) {
+      CONFIG = {
+        dataUrl: CONFIG.dataUrl,
+        formBaseUrl: cfg.form.baseUrl || CONFIG.formBaseUrl,
+        formReporterIdEntry: cfg.form.reporterIdEntry || CONFIG.formReporterIdEntry,
+        formLatEntry: cfg.form.latEntry || CONFIG.formLatEntry,
+        formLonEntry: cfg.form.lonEntry || CONFIG.formLonEntry,
+      };
+    }
+    logDebug("✅town-config.jsonを読み込みました: " + JSON.stringify(cfg));
+  } catch (e) {
+    logDebug("⚠️town-config.jsonの読み込みに失敗。コード内のフォールバック値で動作します: " + e.message);
+  }
+  document.title = SITE_TITLE;
+  document.getElementById("siteTitle").textContent = SITE_TITLE;
+}
+
+// Cesium ionのアクセストークン
+// ★これは個人のCesium ionアカウントのトークンではなく、PLATEAU公式チュートリアル
+// 　（Project-PLATEAU/plateau-streaming-tutorial の3d-tiles配信チュートリアル）に
+// 　「PLATEAU-Terrainで必要」として掲載されている、公開・共有のトークンをそのまま
+// 　使用している（2026-07時点で内容を確認済み）。個人でアカウントを作る必要はない。
+// 　ただしPLATEAU側は「試験的な運用のため提供期間・サービスレベルは保証しない」と
+// 　明記しているため、将来的にこのトークンが無効になる可能性はゼロではない。
+// 　★もし地形やモデルが表示されなくなったら、まずこのページで最新の値を確認すること：
+// 　https://github.com/Project-PLATEAU/plateau-streaming-tutorial/blob/main/3d-tiles/plateau-3dtiles-streaming.md
 const PLATEAU_ION_TOKEN =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
   'eyJqdGkiOiJlNjk0MTM4NC1lMWI0LTQxNTgtYjcxZS01ZWJhMGJlMTE1MWQiLCJpZCI6MTQ5ODk3LCJpYXQiOjE3MTUxNTEyODZ9.' +
   '2aUmEQ2-fDsjf-XeC6-hZpwkgwLse3yXoXF4xTOvPAY';
+
+// 地形データのCesium ion アセットID
+// ★これも上記トークンと同じPLATEAU公式チュートリアルに掲載されている値で、
+// 　「PLATEAU-Terrain」という日本全国をカバーする地形データを指している。
+// 　他の地域で使う場合も、基本的にはこの値のまま変更不要と考えられる
+// 　（対象エリアが日本国内である限り、同じ地形データでカバーされているはず）。
+// 　★地形が表示されなくなったら、上記トークンと同じページで最新のIDを確認すること：
+// 　https://github.com/Project-PLATEAU/plateau-streaming-tutorial/blob/main/3d-tiles/plateau-3dtiles-streaming.md
 const TERRAIN_ASSET_ID = 2488101;
 
-// FreeDay版のカメラ位置をそのまま流用（同じエリアを見せるため）
-const INITIAL_CAMERA = { lon: 139.525347, lat: 35.450514, height: 259.7, heading: 24.10, pitch: -52.00, roll: 0.00 };
-
-// 旭区・泉区（南万騎が原／緑園都市エリア）の建物3D Tiles（FreeDay版と同一）
-// ★2026-07：テクスチャ付きLOD2を試せるよう、切り替え式にした。
-// 　LOD2はLOD1より整備エリアが狭いことが多く、このエリア（住宅地）に存在するかは
-// 　ここからは確認しきれなかったため、実際に試して確認する想定。
-// 　もし読み込みに失敗しても、コードはエラーを無視して黙ってスキップするだけなので安全。
-// ★2026-07 検証結果：みなまき周辺（旭区・泉区）では、LOD2テクスチャ付きのtileset.json自体は
-// 　読み込みに成功する（＝URLとしては存在する）が、実際の建物ジオメトリが入っておらず、
-// 　建物が何も表示されないことを確認した。おそらくPLATEAUのcomposite_url機構が、
-// 　該当データが無くてもエラーにはせず「空のtileset.json」を返しているためと思われる。
-// 　範囲（bounding volume）による自動判定も、この「空だが有効」なケースは検出できなかった。
-// 　→ このエリアでは当面 false（LOD1）で運用する。将来、整備範囲が広がった際に
-// 　　再度trueにして試す価値はある。
-const USE_TEXTURED_LOD2 = false;
-
-const BUILDING_URLS_LOD1 = [
-  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json', // 旭区
-  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod1-texture-2024/tileset.json', // 泉区
-];
-const BUILDING_URLS_LOD2_TEXTURE = [
-  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod2-texture-2024/tileset.json', // 旭区（存在するか未確認）
-  'https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod2-texture-2024/tileset.json', // 泉区（存在するか未確認）
-];
+/* ================================================================
+   アプリ内部の設定（通常は変更不要）
+   ================================================================ */
 
 const TYPE_COLORS = { positive: '#4ade80', negative: '#a9713f' };
 const TYPE_LABELS = { positive: 'プラスの意見（おすすめ）', negative: 'マイナスの意見（気になる点）' };
@@ -329,6 +373,8 @@ function renderDebugLog() {
 }
 
 (async () => {
+  await loadTownConfig(); // 建物URL・カメラ位置・フォーム情報など、この後の処理が使う値を先に確定させておく
+
   const viewer = new Cesium.Viewer('cesiumContainer', {
     baseLayer: false,
     terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID),
@@ -348,56 +394,16 @@ function renderDebugLog() {
   viewer.scene.globe.enableLighting = true;
   viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
-  // ★LOD2は「読み込み自体は成功するが、対象エリアの建物データが実際には無い」ことがある。
-  // 　そこで、読み込んだタイルの範囲（bounding volume）が、みなまき周辺の座標を
-  // 　含んでいるかを確認し、含んでいなければLOD1に自動で切り替える。
-  // 　※範囲の判定に対応してないタイル形式の場合は、判定できないので「カバーしてる」扱いにして通す
-  //   （保守的に倒すことで、間違ってLOD2を消してしまわないようにする）
-  function tilesetCoversPoint(tileset, lon, lat) {
-    try {
-      const rect = tileset.root && tileset.root.boundingVolume && tileset.root.boundingVolume.rectangle;
-      if (!rect) return true;
-      const carto = Cesium.Cartographic.fromDegrees(lon, lat);
-      return Cesium.Rectangle.contains(rect, carto);
-    } catch (e) {
-      return true;
-    }
-  }
-
-  async function loadOneTileset(url) {
+  const tilesets = [];
+  logDebug('建物タイル読み込み開始');
+  for (const url of BUILDING_URLS) {
     try {
       const ts = await Cesium.Cesium3DTileset.fromUrl(url);
-      logDebug(`✅建物タイル読み込み成功: ${url}`);
-      return ts;
-    } catch (e) {
-      logDebug(`⚠️建物タイル読み込み失敗: ${url} / ${e.message}`);
-      return null;
-    }
-  }
-
-  // LOD2を試して、対象エリアをカバーしてなければLOD1にフォールバックする
-  async function loadBuildingWithFallback(lod2Url, lod1Url) {
-    if (!USE_TEXTURED_LOD2) {
-      return loadOneTileset(lod1Url);
-    }
-    const lod2 = await loadOneTileset(lod2Url);
-    if (lod2 && tilesetCoversPoint(lod2, INITIAL_CAMERA.lon, INITIAL_CAMERA.lat)) {
-      logDebug(`→ LOD2がみなまき周辺をカバーしているため、そのまま使用: ${lod2Url}`);
-      return lod2;
-    }
-    if (lod2) {
-      logDebug(`→ LOD2は読み込めたが、みなまき周辺をカバーしていないためLOD1に切り替え`);
-    }
-    return loadOneTileset(lod1Url);
-  }
-
-  const tilesets = [];
-  logDebug(`建物タイル読み込み開始（${USE_TEXTURED_LOD2 ? 'LOD2テクスチャ付き（対象エリア外ならLOD1へ自動切替）' : 'LOD1（テクスチャなし）'}）`);
-  for (let i = 0; i < BUILDING_URLS_LOD1.length; i++) {
-    const ts = await loadBuildingWithFallback(BUILDING_URLS_LOD2_TEXTURE[i], BUILDING_URLS_LOD1[i]);
-    if (ts) {
       viewer.scene.primitives.add(ts);
       tilesets.push(ts);
+      logDebug(`✅建物タイル読み込み成功: ${url}`);
+    } catch (e) {
+      logDebug(`⚠️建物タイル読み込み失敗: ${url} / ${e.message}`);
     }
   }
 
@@ -521,21 +527,6 @@ function renderDebugLog() {
     return REFERENCE_GROUND_HEIGHT;
   }
 
-  const DEBUG_PILLARS = false;
-  function addDebugPillar(lat, lon, groundH, colorHex) {
-    if (!DEBUG_PILLARS) return;
-    viewer.entities.add({
-      polyline: {
-        positions: [
-          Cesium.Cartesian3.fromDegrees(lon, lat, groundH - 5),
-          Cesium.Cartesian3.fromDegrees(lon, lat, groundH + 80),
-        ],
-        width: 8,
-        material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.35, color: Cesium.Color.fromCssColorString(colorHex) }),
-      },
-    });
-  }
-
   // 自分の投稿の周りに出す、ふわっと光るオーラ
   function auraSvg() {
     return 'data:image/svg+xml,' + encodeURIComponent(
@@ -568,7 +559,6 @@ function renderDebugLog() {
       const j = jitterFor(r.id);
       const loc = offsetLatLon(r.lat, r.lon, j.angle, j.dist);
       const groundH = await groundHeightAt(loc.lat, loc.lon);
-      addDebugPillar(loc.lat, loc.lon, groundH, colorForType(r.type));
       const scale = 0.85 + Math.random() * 0.3;
       const trunkH = 1.5 * scale;
       const canopyR = 1.05 * scale;       // 樹冠の「横幅」の半径（丸い木の球の半径にも、円錐の底面半径にも使う）
