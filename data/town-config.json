@@ -1,0 +1,21 @@
+{
+  "siteTitle": "みなま木になるマップ",
+  "camera": {
+    "lon": 139.525347,
+    "lat": 35.450514,
+    "height": 259.7,
+    "heading": 24.1,
+    "pitch": -52,
+    "roll": 0
+  },
+  "buildingUrls": [
+    "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14112-bldg-lod1-texture-2024/tileset.json",
+    "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14116-bldg-lod1-texture-2024/tileset.json"
+  ],
+  "form": {
+    "baseUrl": "https://docs.google.com/forms/d/e/1FAIpQLSeK1BnxEFe2gPVOqga8qW_JWMEpKo3R2UXRllH742HYRE9O0Q/viewform",
+    "reporterIdEntry": "entry.1369737500",
+    "latEntry": "entry.741457000",
+    "lonEntry": "entry.77952795"
+  }
+}
