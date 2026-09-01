@@ -373,6 +373,7 @@ function renderDebugLog() {
 }
 
 (async () => {
+try {
   await loadTownConfig(); // 建物URL・カメラ位置・フォーム情報など、この後の処理が使う値を先に確定させておく
 
   const viewer = new Cesium.Viewer('cesiumContainer', {
@@ -1063,6 +1064,19 @@ function renderDebugLog() {
 
   document.getElementById("loading").style.opacity = "0";
   setTimeout(() => (document.getElementById("loading").style.display = "none"), 500);
+} catch (e) {
+  console.error(e);
+  logDebug("🛑 初期化中にエラーが発生し、地図の表示を続行できませんでした: " + e.message);
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  document.getElementById("loading").innerHTML =
+    '<div style="text-align:center;padding:0 24px;max-width:100%;">' +
+    '<p style="color:#f88;font-weight:bold;">読み込みに失敗しました</p>' +
+    '<p style="font-size:12px;color:var(--sub);margin-top:10px;">' + esc(e.message || e) + '</p>' +
+    '<pre style="text-align:left;font-size:10px;color:var(--sub);margin-top:14px;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all;">' +
+    esc(DEBUG_LOGS.join("\n")) +
+    '</pre>' +
+    '</div>';
+}
 })();
 </script>
 </body>
