@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>みなま木になるマップ</title>
+<title>希望が丘 気になるマップ</title>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -121,11 +121,11 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="loading"><div class="spin"></div><p>木になるマップを読み込んでいます…</p></div>
+<div id="loading"><div class="spin"></div><p>気になるマップを読み込んでいます…</p></div>
 
 <div id="hud">
   <div id="titleBox">
-    <h1 id="siteTitle">みなま木になるマップ</h1>
+    <h1 id="siteTitle">希望が丘 気になるマップ</h1>
     <span>気になる　木になる</span>
   </div>
   <div id="stats">
@@ -221,7 +221,7 @@ let BUILDING_URLS = [
 ];
 
 // サイトのタイトル・見出し（フォールバック値）
-let SITE_TITLE = "みなま木になるマップ";
+let SITE_TITLE = "希望が丘 気になるマップ";
 
 // town-config.json を取得し、成功すれば上記のCONFIG/INITIAL_CAMERA/BUILDING_URLS/SITE_TITLEを
 // 実際の町の値で上書きする。取得に失敗しても、上のフォールバック値でそのまま動き続ける。
@@ -290,7 +290,7 @@ function labelForType(type) {
 /* ============================================================
    報告者ID（localStorage・ログイン不要の緩い識別。自分の投稿を光らせるのに使う）
    ============================================================ */
-const REPORTER_KEY = "minamaki_reporter_id";
+const REPORTER_KEY = "kibogaoka_reporter_id";
 function getOrCreateReporterId() {
   const existing = localStorage.getItem(REPORTER_KEY);
   if (existing) return existing;
