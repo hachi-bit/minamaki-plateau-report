@@ -1,4 +1,38 @@
 {
-  "lastUpdated": "2026-09-01T00:00:00.000Z",
-  "responses": []
+  "lastUpdated": "2026-09-01T08:25:11.595Z",
+  "responses": [
+    {
+      "id": "r_139d24ef",
+      "timestamp": "2026-09-01T08:13:25.424Z",
+      "date": "2026-09-01",
+      "reporterId": "v_7bda65316tx",
+      "type": "positive",
+      "title": "新しいまちづくりの拠点",
+      "content": "エネルギッシュな方が集っています。",
+      "latitude": 35.459732,
+      "longitude": 139.514511
+    },
+    {
+      "id": "r_164f2cd1",
+      "timestamp": "2026-09-01T08:18:51.795Z",
+      "date": "2026-09-01",
+      "reporterId": "v_7bda65316tx",
+      "type": "positive",
+      "title": "駅！",
+      "content": "改札前にコンビニがあり、エスカレーターを降りるとドトールがあります。\n雨に濡れないでいけます。",
+      "latitude": 35.460275,
+      "longitude": 139.514412
+    },
+    {
+      "id": "r_c93a915c",
+      "timestamp": "2026-09-01T08:20:47.260Z",
+      "date": "2026-09-01",
+      "reporterId": "v_7bda65316tx",
+      "type": "positive",
+      "title": "朝はカフェやってます。",
+      "content": "スペシャリティコーヒーを提供しているので美味しいコーヒーを飲みたい方はぜひ！",
+      "latitude": 35.459714,
+      "longitude": 139.51457
+    }
+  ]
 }
