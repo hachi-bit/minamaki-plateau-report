@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>希望が丘 気になるマップ</title>
+<title>希望が丘 木になるマップ</title>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -121,11 +121,11 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="loading"><div class="spin"></div><p>気になるマップを読み込んでいます…</p></div>
+<div id="loading"><div class="spin"></div><p>木になるマップを読み込んでいます…</p></div>
 
 <div id="hud">
   <div id="titleBox">
-    <h1 id="siteTitle">希望が丘 気になるマップ</h1>
+    <h1 id="siteTitle">希望が丘 木になるマップ</h1>
     <span>気になる　木になる</span>
   </div>
   <div id="stats">
@@ -159,6 +159,7 @@
   <button class="iconBtn" id="tourBtn" title="ゆっくり見渡す">🔄</button>
   <button class="iconBtn" id="homeBtn" title="初期位置">🏠</button>
   <button class="iconBtn" id="buildingToggleBtn" title="建物の表示切り替え">🏢</button>
+  <button class="iconBtn" id="lightingToggleBtn" title="太陽光の陰影を切り替え">🌗</button>
   <button class="iconBtn" id="camPanelToggleBtn" title="カメラ座標を調べる">📷</button>
   <button class="iconBtn" id="debugLogToggleBtn" title="ログを見る">🐞</button>
 </div>
@@ -221,7 +222,7 @@ let BUILDING_URLS = [
 ];
 
 // サイトのタイトル・見出し（フォールバック値）
-let SITE_TITLE = "希望が丘 気になるマップ";
+let SITE_TITLE = "希望が丘 木になるマップ";
 
 // town-config.json を取得し、成功すれば上記のCONFIG/INITIAL_CAMERA/BUILDING_URLS/SITE_TITLEを
 // 実際の町の値で上書きする。取得に失敗しても、上のフォールバック値でそのまま動き続ける。
@@ -394,7 +395,7 @@ try {
     viewer.imageryLayers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
   }
   // 太陽光による陰影(enableLighting)を有効にすると、時間帯によって地表の航空写真が
-  // 暗く落ち込んでしまうため、常に一定の明るさで見えるように無効化している。
+  // 暗く落ち込んでしまうため、デフォルトは無効化している。🌗ボタンでON/OFF切り替え可能。
   viewer.scene.globe.enableLighting = false;
   viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
@@ -455,6 +456,17 @@ try {
     tilesets.forEach((ts) => { ts.show = buildingsVisible; });
     e.currentTarget.classList.toggle("active", !buildingsVisible);
     logDebug(`建物の表示: ${buildingsVisible ? "ON" : "OFF"}`);
+  });
+
+  /* ============================================================
+     🌗 太陽光の陰影切り替え（ONにすると時間帯によって地表が暗く見えることがある）
+     ============================================================ */
+  let lightingEnabled = false;
+  document.getElementById("lightingToggleBtn").addEventListener("click", (e) => {
+    lightingEnabled = !lightingEnabled;
+    viewer.scene.globe.enableLighting = lightingEnabled;
+    e.currentTarget.classList.toggle("active", lightingEnabled);
+    logDebug(`太陽光の陰影: ${lightingEnabled ? "ON" : "OFF"}`);
   });
 
 
