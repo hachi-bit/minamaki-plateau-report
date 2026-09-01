@@ -383,7 +383,13 @@ try {
     terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID);
     logDebug('✅地形データ(PLATEAU-Terrain)を読み込みました');
   } catch (e) {
-    logDebug('⚠️地形データの読み込みに失敗（Cesium ionトークンが失効している可能性）。平坦な地形で続行します: ' + e.message);
+    const detail = JSON.stringify({
+      name: e && e.name,
+      message: e && e.message,
+      statusCode: e && e.statusCode,
+      str: e ? String(e) : null,
+    });
+    logDebug('⚠️地形データの読み込みに失敗。平坦な地形で続行します: ' + detail);
     terrainProvider = new Cesium.EllipsoidTerrainProvider();
   }
 
