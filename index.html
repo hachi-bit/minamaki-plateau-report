@@ -251,27 +251,13 @@ async function loadTownConfig() {
   document.getElementById("siteTitle").textContent = SITE_TITLE;
 }
 
-// Cesium ionのアクセストークン
-// ★これは個人のCesium ionアカウントのトークンではなく、PLATEAU公式ドキュメントサイトに
-// 　「PLATEAU-Terrainで必要」として掲載されている、公開・共有のトークンをそのまま
-// 　使用している（2026-09時点で内容を確認済み）。個人でアカウントを作る必要はない。
-// 　ただしPLATEAU側は「試験的な運用のため提供期間・サービスレベルは保証しない」と
-// 　明記しているため、将来的にこのトークンが無効になる可能性はゼロではない。
-// 　★もし地形やモデルが表示されなくなったら、まずこのページで最新の値を確認すること：
+// 地形データ（PLATEAU-Terrain）の配信URL
+// ★以前はCesium ion経由（共有アクセストークン）で取得していたが、そのトークンが
+// 　失効(401)したため、PLATEAU公式のタイル配信サービス（Cesium ion不要・認証不要）に
+// 　切り替えた（2026-09時点で内容を確認済み）。個人アカウントを作る必要はない。
+// 　★地形が表示されなくなったら、まずこのページで最新の配信方法を確認すること：
 // 　https://docs.plateauview.mlit.go.jp/datasets/terrain/
-const PLATEAU_ION_TOKEN =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
-  'eyJqdGkiOiJiODVhMmQ5OS1hOWZjLTQ3YmYtODlmNi1lNWUwY2MwOGUxYTMiLCJpZCI6MTQ5ODk3LCJpYXQiOjE2ODc5MzQ3NDN9.' +
-  'OG0mc3i7ZxGwHQjlMv3TRjiOvKWpzxglxmJRaUIykTY';
-
-// 地形データのCesium ionアセットID
-// ★これも上記トークンと同じPLATEAU公式ドキュメントに掲載されている値で、
-// 　「PLATEAU-Terrain」という日本全国をカバーする地形データを指している。
-// 　他の地域で使う場合も、基本的にはこの値のまま変更不要と考えられる
-// 　（対象エリアが日本国内である限り、同じ地形データでカバーされているはず）。
-// 　★地形が表示されなくなったら、上記トークンと同じページで最新のIDを確認すること：
-// 　https://docs.plateauview.mlit.go.jp/datasets/terrain/
-const TERRAIN_ASSET_ID = 3258112;
+const TERRAIN_URL = "https://tile.plateauview.mlit.go.jp/terrain";
 
 /* ================================================================
    アプリ内部の設定（通常は変更不要）
@@ -347,7 +333,6 @@ function offsetLatLon(lat, lon, angleRad, distM) {
 /* ============================================================
    起動
    ============================================================ */
-Cesium.Ion.defaultAccessToken = PLATEAU_ION_TOKEN;
 
 /* ============================================================
    デバッグログ（画面上に表示・コピーできるようにする）
@@ -375,12 +360,11 @@ function renderDebugLog() {
 try {
   await loadTownConfig(); // 建物URL・カメラ位置・フォーム情報など、この後の処理が使う値を先に確定させておく
 
-  // PLATEAU-Terrain（起伏のある地形）はCesium ionの共有トークン経由で取得しているため、
-  // トークンが失効しているとここで例外が起きる。その場合も地図自体は止めず、
-  // 平坦な地形（起伏なし）にフォールバックして続行する。
+  // PLATEAU-Terrain（起伏のある地形）は上記のPLATEAU公式配信URLから取得している。
+  // 万一ここで例外が起きても地図自体は止めず、平坦な地形（起伏なし）にフォールバックして続行する。
   let terrainProvider;
   try {
-    terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID);
+    terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(TERRAIN_URL, { requestVertexNormals: true });
     logDebug('✅地形データ(PLATEAU-Terrain)を読み込みました');
   } catch (e) {
     const detail = JSON.stringify({
