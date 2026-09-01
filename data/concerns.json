@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-09-01T08:15:12.289Z",
+  "lastUpdated": "2026-09-01T08:20:10.332Z",
   "responses": [
     {
       "id": "r_139d24ef",
@@ -11,6 +11,17 @@
       "content": "エネルギッシュな方が集っています。",
       "latitude": 35.459732,
       "longitude": 139.514511
+    },
+    {
+      "id": "r_164f2cd1",
+      "timestamp": "2026-09-01T08:18:51.795Z",
+      "date": "2026-09-01",
+      "reporterId": "v_7bda65316tx",
+      "type": "positive",
+      "title": "駅！",
+      "content": "改札前にコンビニがあり、エスカレーターを降りるとドトールがあります。\n雨に濡れないでいけます。",
+      "latitude": 35.460275,
+      "longitude": 139.514412
     }
   ]
 }
