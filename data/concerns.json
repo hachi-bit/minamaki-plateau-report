@@ -1,4 +1,16 @@
 {
-  "lastUpdated": "2026-09-01T00:00:00.000Z",
-  "responses": []
+  "lastUpdated": "2026-09-01T08:15:12.289Z",
+  "responses": [
+    {
+      "id": "r_139d24ef",
+      "timestamp": "2026-09-01T08:13:25.424Z",
+      "date": "2026-09-01",
+      "reporterId": "v_7bda65316tx",
+      "type": "positive",
+      "title": "新しいまちづくりの拠点",
+      "content": "エネルギッシュな方が集っています。",
+      "latitude": 35.459732,
+      "longitude": 139.514511
+    }
+  ]
 }
