@@ -393,7 +393,9 @@ try {
   } catch (e) {
     viewer.imageryLayers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
   }
-  viewer.scene.globe.enableLighting = true;
+  // 太陽光による陰影(enableLighting)を有効にすると、時間帯によって地表の航空写真が
+  // 暗く落ち込んでしまうため、常に一定の明るさで見えるように無効化している。
+  viewer.scene.globe.enableLighting = false;
   viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
   const tilesets = [];
@@ -953,7 +955,7 @@ try {
 
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromRadians(targetCarto.longitude, targetCarto.latitude, Math.max(pos.height, 400)),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+      orientation: { heading: prePlantCamera.heading, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     sscc.enableTilt = false;
   }
