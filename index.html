@@ -376,9 +376,21 @@ function renderDebugLog() {
 try {
   await loadTownConfig(); // 建物URL・カメラ位置・フォーム情報など、この後の処理が使う値を先に確定させておく
 
+  // PLATEAU-Terrain（起伏のある地形）はCesium ionの共有トークン経由で取得しているため、
+  // トークンが失効しているとここで例外が起きる。その場合も地図自体は止めず、
+  // 平坦な地形（起伏なし）にフォールバックして続行する。
+  let terrainProvider;
+  try {
+    terrainProvider = await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID);
+    logDebug('✅地形データ(PLATEAU-Terrain)を読み込みました');
+  } catch (e) {
+    logDebug('⚠️地形データの読み込みに失敗（Cesium ionトークンが失効している可能性）。平坦な地形で続行します: ' + e.message);
+    terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  }
+
   const viewer = new Cesium.Viewer('cesiumContainer', {
     baseLayer: false,
-    terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(TERRAIN_ASSET_ID),
+    terrainProvider,
     animation: false, timeline: false, homeButton: false, geocoder: false,
     sceneModePicker: false, baseLayerPicker: false, navigationHelpButton: false,
     fullscreenButton: false, selectionIndicator: false, infoBox: false,
