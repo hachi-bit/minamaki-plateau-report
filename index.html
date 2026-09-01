@@ -183,7 +183,7 @@
 
 <div id="ctaBar">
   <div id="plantConfirmBar">
-    <span>この場所を報告するのら？</span>
+    <span>この場所を報告しますか？</span>
     <button class="sheetBtn primary" id="plantConfirmBtn" style="flex:none;padding:9px 16px;">決定</button>
     <button class="sheetBtn" id="plantCancelBtn" style="flex:none;padding:9px 16px;">やめる</button>
   </div>
@@ -317,7 +317,7 @@ async function loadData() {
     });
     return json;
   } catch (e) {
-    console.warn("concerns.json が読めなかったのでサンプルを表示するのら:", e.message);
+    console.warn("concerns.json が読めなかったのでサンプルを表示します:", e.message);
     const sample = JSON.parse(JSON.stringify(SAMPLE_FALLBACK));
     sample.responses.forEach((r) => { r.lat = r.latitude; r.lon = r.longitude; });
     return sample;
