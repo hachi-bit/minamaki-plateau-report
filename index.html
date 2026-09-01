@@ -252,27 +252,26 @@ async function loadTownConfig() {
 }
 
 // Cesium ionのアクセストークン
-// ★これは個人のCesium ionアカウントのトークンではなく、PLATEAU公式チュートリアル
-// 　（Project-PLATEAU/plateau-streaming-tutorial の3d-tiles配信チュートリアル）に
+// ★これは個人のCesium ionアカウントのトークンではなく、PLATEAU公式ドキュメントサイトに
 // 　「PLATEAU-Terrainで必要」として掲載されている、公開・共有のトークンをそのまま
-// 　使用している（2026-07時点で内容を確認済み）。個人でアカウントを作る必要はない。
+// 　使用している（2026-09時点で内容を確認済み）。個人でアカウントを作る必要はない。
 // 　ただしPLATEAU側は「試験的な運用のため提供期間・サービスレベルは保証しない」と
 // 　明記しているため、将来的にこのトークンが無効になる可能性はゼロではない。
 // 　★もし地形やモデルが表示されなくなったら、まずこのページで最新の値を確認すること：
-// 　https://github.com/Project-PLATEAU/plateau-streaming-tutorial/blob/main/3d-tiles/plateau-3dtiles-streaming.md
+// 　https://docs.plateauview.mlit.go.jp/datasets/terrain/
 const PLATEAU_ION_TOKEN =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
-  'eyJqdGkiOiJlNjk0MTM4NC1lMWI0LTQxNTgtYjcxZS01ZWJhMGJlMTE1MWQiLCJpZCI6MTQ5ODk3LCJpYXQiOjE3MTUxNTEyODZ9.' +
-  '2aUmEQ2-fDsjf-XeC6-hZpwkgwLse3yXoXF4xTOvPAY';
+  'eyJqdGkiOiJiODVhMmQ5OS1hOWZjLTQ3YmYtODlmNi1lNWUwY2MwOGUxYTMiLCJpZCI6MTQ5ODk3LCJpYXQiOjE2ODc5MzQ3NDN9.' +
+  'OG0mc3i7ZxGwHQjlMv3TRjiOvKWpzxglxmJRaUIykTY';
 
-// 地形データのCesium ion アセットID
-// ★これも上記トークンと同じPLATEAU公式チュートリアルに掲載されている値で、
+// 地形データのCesium ionアセットID
+// ★これも上記トークンと同じPLATEAU公式ドキュメントに掲載されている値で、
 // 　「PLATEAU-Terrain」という日本全国をカバーする地形データを指している。
 // 　他の地域で使う場合も、基本的にはこの値のまま変更不要と考えられる
 // 　（対象エリアが日本国内である限り、同じ地形データでカバーされているはず）。
 // 　★地形が表示されなくなったら、上記トークンと同じページで最新のIDを確認すること：
-// 　https://github.com/Project-PLATEAU/plateau-streaming-tutorial/blob/main/3d-tiles/plateau-3dtiles-streaming.md
-const TERRAIN_ASSET_ID = 2488101;
+// 　https://docs.plateauview.mlit.go.jp/datasets/terrain/
+const TERRAIN_ASSET_ID = 3258112;
 
 /* ================================================================
    アプリ内部の設定（通常は変更不要）
